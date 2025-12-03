@@ -2,33 +2,26 @@
 # Extract scFoundation embeddings
 #
 # scFoundation embeddings are extracted using the get_embedding.py script
-# Input: {dataset_dir}/scfoundation/data.npz (from 0b_data_model_preparation)
-# Output: {dataset_dir}/../Result/{dataset_name}/scfoundation/cell_embeddings.npy
+# Input: {output_data_dir}/scfoundation/data.npz
+# Output: {output_res_dir}/scfoundation/cell_embeddings.npy
 #
 # Requires: scFoundation model checkpoint (configured in config.yaml)
 
 set -e
 
-DATASET_DIR="$1"
+DATASET=""
+CONFIG=""
 
-if [ -z "$DATASET_DIR" ]; then
-    echo "Usage: $0 <dataset_dir>"
-    exit 1
-fi
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dataset) DATASET="$2"; shift 2 ;;
+        --config) CONFIG="$2"; shift 2 ;;
+        *) echo "Usage: $0 --dataset <name> --config <path>"; exit 1 ;;
+    esac
+done
 
-# Check input file
-INPUT_FILE="$DATASET_DIR/scfoundation/data.npz"
-if [ ! -f "$INPUT_FILE" ]; then
-    echo "ERROR: scFoundation data.npz not found at $INPUT_FILE"
-    exit 1
-fi
-
-# Extract dataset name from path
-DATASET_NAME=$(basename "$DATASET_DIR")
-
-# Create output directory
-RESULT_DIR="$DATASET_DIR/../Result/$DATASET_NAME/scfoundation"
-mkdir -p "$RESULT_DIR"
+[ -z "$DATASET" ] || [ -z "$CONFIG" ] && echo "Error: Missing arguments" && exit 1
+[ ! -f "$CONFIG" ] && echo "Error: Config file not found: $CONFIG" && exit 1
 
 # Get scFoundation configuration from config.yaml
 SCFOUNDATION_CFG=$(python3 << 'EOF'
@@ -37,43 +30,48 @@ import sys
 import yaml
 import json
 
-# Try to load config.yaml
-config_paths = [
-    os.path.join(os.path.dirname(__file__), '../../config.yaml'),
-    '/home/wanglinting/scFM/Src/config.yaml',
-]
+config_path = sys.argv[1]
+dataset_name = sys.argv[2]
 
-for config_path in config_paths:
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            scfoundation_cfg = config.get('model_paths', {}).get('scfoundation', {})
-            
-            result = {
-                'code_path': scfoundation_cfg.get('code_path', "/home/wanglinting/LCBERT/Code/model-scFoundation"),
-                'model_path': scfoundation_cfg.get('model_path', "/home/wanglinting/LCBERT/Download/scFoundation-main/model/models/models.ckpt"),
-                'gpu': scfoundation_cfg.get('gpu', 4),
-            }
-            print(json.dumps(result))
-            sys.exit(0)
-        except:
-            pass
+with open(config_path, 'r') as f:
+    config = yaml.safe_load(f)
 
-# Fallback to defaults
+dataset_config = config['datasets'][dataset_name]
+scfoundation_cfg = config.get('model_paths', {}).get('scfoundation', {})
+
+data_dir = dataset_config['output_data_dir']
+res_dir = dataset_config.get('output_res_dir', os.path.join(data_dir, 'Result', dataset_name))
+
 result = {
-    'code_path': "/home/wanglinting/LCBERT/Code/model-scFoundation",
-    'model_path': "/home/wanglinting/LCBERT/Download/scFoundation-main/model/models/models.ckpt",
-    'gpu': 4,
+    'data_dir': data_dir,
+    'res_dir': res_dir,
+    'code_path': scfoundation_cfg.get('code_path', ""),
+    'model_path': scfoundation_cfg.get('model_path', ""),
+    'gpu': scfoundation_cfg.get('gpu', 4),
 }
 print(json.dumps(result))
 EOF
+"$CONFIG" "$DATASET"
 )
 
 # Parse config
+DATA_DIR=$(echo "$SCFOUNDATION_CFG" | python3 -c "import sys, json; print(json.load(sys.stdin)['data_dir'])")
+RES_DIR=$(echo "$SCFOUNDATION_CFG" | python3 -c "import sys, json; print(json.load(sys.stdin)['res_dir'])")
 SCFOUNDATION_CODE=$(echo "$SCFOUNDATION_CFG" | python3 -c "import sys, json; print(json.load(sys.stdin)['code_path'])")
 SCFOUNDATION_MODEL=$(echo "$SCFOUNDATION_CFG" | python3 -c "import sys, json; print(json.load(sys.stdin)['model_path'])")
 SCFOUNDATION_GPU=$(echo "$SCFOUNDATION_CFG" | python3 -c "import sys, json; print(json.load(sys.stdin)['gpu'])")
+
+INPUT_FILE="$DATA_DIR/scfoundation/data.npz"
+RESULT_DIR="$RES_DIR/scfoundation"
+
+# Check input file
+if [ ! -f "$INPUT_FILE" ]; then
+    echo "ERROR: scFoundation data.npz not found at $INPUT_FILE"
+    exit 1
+fi
+
+# Create output directory
+mkdir -p "$RESULT_DIR"
 
 # Set GPU device from config
 export CUDA_VISIBLE_DEVICES=$SCFOUNDATION_GPU
@@ -81,7 +79,8 @@ export CUDA_VISIBLE_DEVICES=$SCFOUNDATION_GPU
 # Change to scFoundation model directory
 cd "$SCFOUNDATION_CODE"
 
-echo "[scFoundation] Extracting embeddings from $INPUT_FILE"
+echo "[scFoundation] Dataset: $DATASET"
+echo "[scFoundation] Input: $INPUT_FILE"
 echo "[scFoundation] Output directory: $RESULT_DIR"
 echo "[scFoundation] Using GPU: $SCFOUNDATION_GPU"
 echo "[scFoundation] Model path: $SCFOUNDATION_MODEL"

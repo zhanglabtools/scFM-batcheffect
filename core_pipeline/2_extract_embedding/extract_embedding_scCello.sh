@@ -2,104 +2,97 @@
 # Extract scCello embeddings
 #
 # scCello embeddings are extracted using HuggingFace-compatible zero-shot model
-# Input: {dataset_dir}/sccello/ (processed data from 0b_data_model_preparation)
-# Output: {dataset_dir}/../Result/{dataset_name}/sccello/embeddings/cell_embeddings.npy
+# Input: {output_data_dir}/sccello/ (processed data from prepare_sccello.sh)
+# Output: {output_res_dir}/sccello/cell_embeddings.npy
 #
 # Requires: scCello pretrained model from HuggingFace (configured in config.yaml)
 
 set -e
 
-DATASET_DIR="$1"
+# Parse arguments
+DATASET=""
+CONFIG=""
 
-if [ -z "$DATASET_DIR" ]; then
-    echo "Usage: $0 <dataset_dir>"
-    exit 1
-fi
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --dataset) DATASET="$2"; shift 2 ;;
+        --config) CONFIG="$2"; shift 2 ;;
+        *) echo "Usage: $0 --dataset <name> --config <path>"; exit 1 ;;
+    esac
+done
+
+[ -z "$DATASET" ] || [ -z "$CONFIG" ] && echo "Error: Missing arguments" && exit 1
+[ ! -f "$CONFIG" ] && echo "Error: Config file not found: $CONFIG" && exit 1
+
+# Get paths and config from YAML
+read -r DATA_DIR RES_DIR CODE_PATH PRETRAINED_CKPT GPU BATCH_SIZE TRANSFORMATION_SCRIPT <<< $(python3 << 'PYSCRIPT'
+import sys
+import os
+import yaml
+import json
+
+config_path = sys.argv[1]
+dataset_name = sys.argv[2]
+
+with open(config_path, 'r') as f:
+    config = yaml.safe_load(f)
+
+dataset_config = config['datasets'][dataset_name]
+sccello_config = config['model_paths']['sccello']
+
+data_dir = dataset_config['output_data_dir']
+res_dir = dataset_config.get('output_res_dir')
+code_path = sccello_config['code_path']
+pretrained_ckpt = sccello_config['pretrained_ckpt']
+gpu = sccello_config.get('gpu', 5)
+batch_size = sccello_config.get('batch_size', 32)
+transformation_script = sccello_config.get('transformation_script', '')
+
+print(f"{data_dir} {res_dir} {code_path} {pretrained_ckpt} {gpu} {batch_size} {transformation_script}")
+PYSCRIPT
+python3 - "$CONFIG" "$DATASET"
+)
+
+INPUT_DIR="$DATA_DIR/sccello"
+RESULT_DIR="$RES_DIR/sccello"
 
 # Check input directory
-INPUT_DIR="$DATASET_DIR/sccello"
 if [ ! -d "$INPUT_DIR" ]; then
     echo "ERROR: scCello data directory not found at $INPUT_DIR"
     exit 1
 fi
 
-# Extract dataset name from path
-DATASET_NAME=$(basename "$DATASET_DIR")
-
 # Create output directory
-RESULT_DIR="$DATASET_DIR/../Result/$DATASET_NAME/sccello"
 mkdir -p "$RESULT_DIR"
 
-# Get scCello configuration from config.yaml
-SCCELLO_CFG=$(python3 << 'EOF'
-import os
-import sys
-import yaml
-import json
-
-# Try to load config.yaml
-config_paths = [
-    os.path.join(os.path.dirname(__file__), '../../config.yaml'),
-    '/home/wanglinting/scFM/Src/config.yaml',
-]
-
-for config_path in config_paths:
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r') as f:
-                config = yaml.safe_load(f)
-            sccello_cfg = config.get('model_paths', {}).get('sccello', {})
-            
-            result = {
-                'code_path': sccello_cfg.get('code_path', "/home/wanglinting/LCBERT/Code/model-sccello"),
-                'pretrained_ckpt': sccello_cfg.get('pretrained_ckpt', "/home/wanglinting/LCBERT/Download/scCello/scCello-zeroshot"),
-                'gpu': sccello_cfg.get('gpu', 5),
-            }
-            print(json.dumps(result))
-            sys.exit(0)
-        except:
-            pass
-
-# Fallback to defaults
-result = {
-    'code_path': "/home/wanglinting/LCBERT/Code/model-sccello",
-    'pretrained_ckpt': "/home/wanglinting/LCBERT/Download/scCello/scCello-zeroshot",
-    'gpu': 5,
-}
-print(json.dumps(result))
-EOF
-)
-
-# Parse config
-SCCELLO_CODE=$(echo "$SCCELLO_CFG" | python3 -c "import sys, json; print(json.load(sys.stdin)['code_path'])")
-SCCELLO_PRETRAINED=$(echo "$SCCELLO_CFG" | python3 -c "import sys, json; print(json.load(sys.stdin)['pretrained_ckpt'])")
-SCCELLO_GPU=$(echo "$SCCELLO_CFG" | python3 -c "import sys, json; print(json.load(sys.stdin)['gpu'])")
-
 # Set GPU device
-export CUDA_VISIBLE_DEVICES=$SCCELLO_GPU
+export CUDA_VISIBLE_DEVICES=$GPU
 
 # Change to scCello model directory
-cd "$SCCELLO_CODE"
+cd "$CODE_PATH"
 
-echo "[scCello] Extracting embeddings from $INPUT_DIR"
-echo "[scCello] Output directory: $RESULT_DIR"
-echo "[scCello] Using GPU: $SCCELLO_GPU"
+echo "Dataset: $DATASET"
+echo "Input dir: $INPUT_DIR"
+echo "Output dir: $RESULT_DIR"
+echo "GPU: $GPU"
+echo "Batch size: $BATCH_SIZE"
+
+# Check if input data exists
+if [ ! -d "$INPUT_DIR/processed_pretraining_data_postproc" ]; then
+    echo "ERROR: Processed data not found at $INPUT_DIR/processed_pretraining_data_postproc"
+    echo "Make sure prepare_sccello.sh has been executed first"
+    exit 1
+fi
+
+echo "Extracting scCello embeddings..."
 
 # Run scCello embedding extraction
-# Parameters:
-#   --pretrained_ckpt: Path to pretrained model or HuggingFace model name
-#   --data_path: Path to processed data (output from run_data_transformation.py)
-#   --output_dir: Output directory for embeddings
-#   --batch_size: Inference batch size
-#   --data_format: Input data format (huggingface, pickle, numpy)
-#   --filename_prefix: Output file name prefix
-
 python extract_embeddings.py \
-    --pretrained_ckpt "$SCCELLO_PRETRAINED" \
-    --data_path "$INPUT_DIR/proceseed_pretraining_data_postproc" \
+    --pretrained_ckpt "$PRETRAINED_CKPT" \
+    --data_path "$INPUT_DIR/processed_pretraining_data_postproc" \
     --output_dir "$RESULT_DIR" \
-    --batch_size 32 \
+    --batch_size "$BATCH_SIZE" \
     --data_format huggingface
 
-echo "[scCello] ✓ Embedding extraction complete"
-echo "[scCello] Results saved to $RESULT_DIR"
+echo "✓ scCello embedding extraction complete"
+echo "Results saved to $RESULT_DIR"

@@ -16,42 +16,32 @@ Process:
 import argparse
 import os
 import logging
-import sys
+import yaml
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Add config loader to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-from config_loader import load_config, get_model_path, get_model_config
 
-# Load configuration
-try:
-    config = load_config()
-except Exception as e:
-    logger.warning(f"Could not load config.yaml, using hardcoded defaults: {e}")
-    config = None
-
-# scFoundation gene list path (from config or hardcoded default)
-def get_scfoundation_gene_list():
-    if config:
-        return get_model_path(config, 'scfoundation', 'gene_list',
-               "/home/wanglinting/LCBERT/Code/model-scFoundation/OS_scRNA_gene_index.19264.tsv")
-    return "/home/wanglinting/LCBERT/Code/model-scFoundation/OS_scRNA_gene_index.19264.tsv"
-
-SCFOUNDATION_GENE_LIST = get_scfoundation_gene_list()
+def load_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
 
 
-def prepare_scfoundation(dataset_dir):
+def prepare_scfoundation(dataset_config, model_config):
     """
     Prepare data for scFoundation model.
     
-    Input: data.h5ad (from 0a_data_aggregation, X is log1p-normalized)
-    Output: {dataset_dir}/scfoundation/data.npz (sparse matrix, 19264 genes)
+    Input: data.h5ad (from data_preprocess.py, X is log1p-normalized)
+    Output: {output_data_dir}/scfoundation/data.npz (sparse matrix, 19264 genes)
     
     Steps:
     1. Load data.h5ad
@@ -59,23 +49,27 @@ def prepare_scfoundation(dataset_dir):
     3. Select/pad genes to match exact list
     4. Save sparse matrix as NPZ
     """
-    logger.info(f"Preparing scFoundation input from {dataset_dir}")
+    logger.info("Preparing scFoundation input...")
     
-    # Check input file
-    data_h5ad = os.path.join(dataset_dir, 'data.h5ad')
+    # Get output directory from config
+    output_dir = dataset_config['output_data_dir']
+    data_h5ad = os.path.join(output_dir, 'data.h5ad')
+    
     if not os.path.exists(data_h5ad):
         raise FileNotFoundError(f"data.h5ad not found at {data_h5ad}")
     
-    # Check gene list file
-    if not os.path.exists(SCFOUNDATION_GENE_LIST):
-        raise FileNotFoundError(f"Gene list not found at {SCFOUNDATION_GENE_LIST}")
+    # Get gene list path from model_paths config
+    gene_list_path = model_config['scfoundation']['gene_list']
+    
+    if not os.path.exists(gene_list_path):
+        raise FileNotFoundError(f"Gene list not found at {gene_list_path}")
     
     # Load data
     adata = sc.read_h5ad(data_h5ad)
     logger.info(f"Loaded data: {adata.shape}")
     
     # Read gene list (19264 genes)
-    gene_df = pd.read_csv(SCFOUNDATION_GENE_LIST, header=0, delimiter='\t')
+    gene_df = pd.read_csv(gene_list_path, header=0, delimiter='\t')
     gene_list = list(gene_df['gene_name'])
     logger.info(f"Loaded gene list with {len(gene_list)} genes")
     
@@ -109,44 +103,36 @@ def prepare_scfoundation(dataset_dir):
     logger.info(f"Built sparse matrix: {X_selected.shape}")
     
     # Create output directory and save
-    scfoundation_dir = os.path.join(dataset_dir, 'scfoundation')
+    scfoundation_dir = os.path.join(output_dir, 'scfoundation')
     os.makedirs(scfoundation_dir, exist_ok=True)
     
     output_file = os.path.join(scfoundation_dir, 'data.npz')
     sp.save_npz(output_file, X_selected)
     logger.info(f"Saved scFoundation input to {output_file}")
+    logger.info(f"Final shape: {X_selected.shape}")
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(description='Prepare scFoundation model input')
-    parser.add_argument('--dataset', type=str, required=True, help='Dataset directory')
+    parser.add_argument('--dataset', type=str, required=True,
+                        choices=['limb', 'liver', 'Immune', 'HLCA_assay', 'HLCA_disease', 'HLCA_sn'],
+                        help='Dataset name')
+    parser.add_argument('--config', type=str, required=True,
+                        help='Path to config.yaml file')
     
     args = parser.parse_args()
-    prepare_scfoundation(args.dataset)
-    X_sparse = sp.csr_matrix(adata.X) if not sp.issparse(adata.X) else adata.X.tocsr()
     
-    # Save sparse matrix
-    npz_file = os.path.join(scfound_dir, 'data.npz')
-    sp.save_npz(npz_file, X_sparse)
-    logger.info(f"Saved sparse matrix to {npz_file}")
+    # Load configuration
+    config = load_config(args.config)
     
-    # Save gene index mapping
-    gene_index_file = os.path.join(scfound_dir, 'gene_names.json')
-    gene_mapping = {i: gene for i, gene in enumerate(adata.var_names)}
-    with open(gene_index_file, 'w') as f:
-        json.dump(gene_mapping, f)
-    logger.info(f"Saved gene mapping to {gene_index_file}")
+    # Extract dataset-specific configuration
+    dataset_config = config['datasets'][args.dataset]
+    model_config = config['model_paths']
+    logger.info(f"Loading dataset configuration for: {args.dataset}")
     
-    # Save cell metadata
-    metadata_file = os.path.join(scfound_dir, 'cell_metadata.csv')
-    adata.obs.to_csv(metadata_file)
-    logger.info(f"Saved cell metadata to {metadata_file}")
+    # Prepare scFoundation input
+    prepare_scfoundation(dataset_config)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Prepare scFoundation input')
-    parser.add_argument('--data', type=str, required=True, help='Path to data.h5ad')
-    parser.add_argument('--output', type=str, required=True, help='Output directory')
-    
-    args = parser.parse_args()
-    prepare_scfoundation(args.data, args.output)
+    main()

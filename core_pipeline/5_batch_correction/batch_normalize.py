@@ -2,20 +2,18 @@
 """
 Batch normalization script: Apply batch effect correction to embeddings.
 
-Supports three batch correction methods:
-1. Batch centering (by cells): Subtract batch-wise mean embedding
-2. Batch centering (by celltypes): Subtract batch-wise celltype-mean embedding
-3. PCA debiasing: Remove top principal components
+Batch centering method: Subtract batch-wise mean embedding
 
 Usage:
-    python batch_normalize.py --dataset /path/to/dataset --model {model_name} --method {method}
-    python batch_normalize.py --dataset /path/to/limb --model geneformer --method batch_cells
+    python batch_normalize.py --dataset limb --model geneformer --config config.yaml
+    python batch_normalize.py --dataset Immune --model harmony --config config.yaml
 """
 
+import argparse
 import os
 import sys
+import yaml
 import time
-import argparse
 import logging
 from datetime import datetime
 import warnings
@@ -42,46 +40,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def load_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
 class BatchNormalizer:
     """Apply batch effect correction to embeddings."""
     
-    def __init__(self, dataset_dir, result_dir=None):
+    def __init__(self, dataset_dir, result_dir, batch_key, label_key, batch_correction_config):
         """
         Initialize normalizer.
         
         Args:
-            dataset_dir: Directory containing standardized data.h5ad and config.yaml
+            dataset_dir: Directory containing standardized data.h5ad
             result_dir: Result directory containing Embeddings_{model}.h5ad
+            batch_key: Column name for batch annotation
+            label_key: Column name for cell type annotation
+            batch_correction_config: Batch correction configuration dict
         """
         self.dataset_dir = dataset_dir
         self.result_dir = result_dir
-        self.batch_key = None
-        self.label_key = None
-        self.load_config()
-    
-    def load_config(self):
-        """Load batch_key and label_key from config.yaml."""
-        config_file = os.path.join(self.dataset_dir, 'config.yaml')
-        
-        if os.path.exists(config_file):
-            try:
-                import yaml
-                with open(config_file, 'r') as f:
-                    config = yaml.safe_load(f)
-                
-                if isinstance(config, dict):
-                    self.batch_key = config.get('batch_key', 'batch')
-                    self.label_key = config.get('celltype_key', 'cell_type')
-                    
-                    logger.info(f"Loaded config: batch_key={self.batch_key}, label_key={self.label_key}")
-            except Exception as e:
-                logger.warning(f"Failed to load config.yaml: {e}")
-        
-        # Set defaults if not loaded from config
-        if not self.batch_key:
-            self.batch_key = 'batch'
-        if not self.label_key:
-            self.label_key = 'cell_type'
+        self.batch_key = batch_key
+        self.label_key = label_key
+        self.batch_correction_config = batch_correction_config
     
     def load_data(self, model_name):
         """Load integrated embedding data."""
@@ -96,22 +80,39 @@ class BatchNormalizer:
         
         return adata, model_result_dir
     
-    def center_by_batch_cells(self, adata, embedding_key='X_emb', 
-                             max_cells_per_batch=10000, random_seed=42, normalize=True):
+    def validate_metadata(self, adata):
+        """Validate that required metadata columns exist."""
+        missing_keys = []
+        
+        if self.batch_key not in adata.obs.columns:
+            missing_keys.append(self.batch_key)
+        if self.label_key not in adata.obs.columns:
+            missing_keys.append(self.label_key)
+        
+        if missing_keys:
+            logger.warning(f"Missing metadata columns: {missing_keys}")
+            logger.warning(f"Available obs columns: {adata.obs.columns.tolist()}")
+            return False
+        
+        return True
+    
+    def center_by_batch_cells(self, adata, embedding_key='X_emb'):
         """
         Center embeddings by subtracting batch-wise mean (all cells).
         
         Args:
             adata: AnnData object
             embedding_key: Key in obsm for embedding
-            max_cells_per_batch: Max cells to use for computing mean per batch
-            random_seed: Random seed for sampling
-            normalize: Whether to apply L2 normalization after centering
         
         Returns:
             centered_embeddings: Batch-centered embeddings
         """
-        logger.info("Applying batch centering by cells (batch-wise mean)...")
+        logger.info("Applying batch centering (batch-wise mean)...")
+        
+        # Get parameters from config
+        max_cells_per_batch = self.batch_correction_config.get('batch_cells', {}).get('max_cells_per_batch', 10000)
+        random_seed = self.batch_correction_config.get('batch_cells', {}).get('random_seed', 42)
+        normalize = self.batch_correction_config.get('batch_cells', {}).get('normalize', True)
         
         embeddings = adata.obsm[embedding_key].copy()
         centered_embeddings = embeddings.copy()
@@ -145,95 +146,6 @@ class BatchNormalizer:
         
         return centered_embeddings
     
-    def center_by_batch_celltypes(self, adata, embedding_key='X_emb', normalize=True):
-        """
-        Center embeddings by subtracting batch-wise celltype-mean embedding.
-        
-        Args:
-            adata: AnnData object
-            embedding_key: Key in obsm for embedding
-            normalize: Whether to apply L2 normalization after centering
-        
-        Returns:
-            centered_embeddings: Batch-centered embeddings
-        """
-        logger.info("Applying batch centering by celltypes (batch-wise celltype-mean)...")
-        
-        embeddings = adata.obsm[embedding_key].copy()
-        centered_embeddings = embeddings.copy()
-        
-        # Process each batch
-        for batch in adata.obs[self.batch_key].unique():
-            batch_mask = adata.obs[self.batch_key] == batch
-            batch_indices = np.where(batch_mask)[0]
-            
-            # Get celltype means for this batch
-            batch_obs = adata.obs.loc[batch_mask]
-            batch_celltype_means = []
-            
-            for celltype in batch_obs[self.label_key].unique():
-                celltype_mask = batch_obs[self.label_key] == celltype
-                celltype_indices = np.where(celltype_mask)[0] + batch_indices[0]  # Adjust indices
-                celltype_indices = batch_indices[batch_obs[self.label_key] == celltype]
-                
-                # Compute celltype mean
-                celltype_mean = embeddings[celltype_indices].mean(axis=0)
-                batch_celltype_means.append(celltype_mean)
-            
-            # Compute batch-wide celltype mean
-            batch_celltype_mean = np.array(batch_celltype_means).mean(axis=0)
-            
-            # Center all cells in batch
-            centered_embeddings[batch_indices] = embeddings[batch_indices] - batch_celltype_mean
-            
-            logger.info(f"  Batch {batch}: Used {len(batch_celltype_means)} celltypes to compute mean for {len(batch_indices)} cells")
-        
-        # L2 normalization
-        if normalize:
-            from sklearn.preprocessing import normalize as sk_normalize
-            centered_embeddings = sk_normalize(centered_embeddings, norm="l2")
-            logger.info("  Applied L2 normalization")
-        
-        return centered_embeddings
-    
-    def pca_debias(self, adata, embedding_key='X_emb', n_components=1, normalize=True):
-        """
-        Remove top principal components from embeddings.
-        
-        Args:
-            adata: AnnData object
-            embedding_key: Key in obsm for embedding
-            n_components: Number of top components to remove
-            normalize: Whether to apply L2 normalization after debiasing
-        
-        Returns:
-            debiased_embeddings: PCA-debiased embeddings
-        """
-        from sklearn.decomposition import PCA
-        from sklearn.preprocessing import normalize as sk_normalize
-        
-        logger.info(f"Applying PCA debiasing (removing top {n_components} components)...")
-        
-        embeddings = adata.obsm[embedding_key].copy()
-        
-        # Fit PCA
-        pca = PCA(n_components=min(n_components + 1, embeddings.shape[1]))
-        pca.fit(embeddings)
-        
-        # Project to first n_components and subtract
-        principal_components = pca.components_[:n_components]
-        projections = embeddings.dot(principal_components.T).dot(principal_components)
-        debiased_embeddings = embeddings - projections
-        
-        logger.info(f"  Removed components explain variance: {pca.explained_variance_ratio_[:n_components]}")
-        
-        # L2 normalization
-        if normalize:
-            debiased_embeddings = sk_normalize(debiased_embeddings, norm="l2")
-            logger.info("  Applied L2 normalization")
-        
-        return debiased_embeddings
-    
     def compute_umap_visualization(self, adata, embedding_key='X_emb', model_result_dir=None):
         """Compute UMAP and create visualizations."""
         logger.info("Computing UMAP and visualizations...")
@@ -251,7 +163,7 @@ class BatchNormalizer:
             for col in [self.batch_key, self.label_key]:
                 if col in adata.obs.columns:
                     try:
-                        fig = sc.pl.umap(adata, color=col, show=False, size=10)
+                        sc.pl.umap(adata, color=col, show=False, size=10)
                         output_file = os.path.join(model_result_dir, f'umap_{col}.png')
                         plt.savefig(output_file, bbox_inches='tight', dpi=150)
                         plt.close()
@@ -308,32 +220,28 @@ class BatchNormalizer:
         
         return results_df
     
-    def normalize(self, model_name, method='batch_cells'):
+    def normalize(self, model_name):
         """
         Full batch normalization pipeline.
         
         Args:
             model_name: Name of model to normalize
-            method: Normalization method ('batch_cells', 'batch_celltypes', 'pca_debias')
         """
         logger.info(f"{'='*60}")
         logger.info(f"Starting batch normalization for: {model_name.upper()}")
-        logger.info(f"Method: {method}")
         logger.info(f"{'='*60}")
         
         try:
             # Load data
             adata, model_result_dir = self.load_data(model_name)
             
-            # Apply batch correction
-            if method == 'batch_cells':
-                corrected_emb = self.center_by_batch_cells(adata, embedding_key='X_emb')
-            elif method == 'batch_celltypes':
-                corrected_emb = self.center_by_batch_celltypes(adata, embedding_key='X_emb')
-            elif method == 'pca_debias':
-                corrected_emb = self.pca_debias(adata, embedding_key='X_emb')
-            else:
-                raise ValueError(f"Unknown method: {method}")
+            # Validate metadata
+            if not self.validate_metadata(adata):
+                logger.error("Required metadata columns missing")
+                return False
+            
+            # Apply batch correction (batch_cells method)
+            corrected_emb = self.center_by_batch_cells(adata, embedding_key='X_emb')
             
             # Store corrected embedding
             adata.obsm['X_emb_corrected'] = corrected_emb
@@ -365,32 +273,43 @@ class BatchNormalizer:
             raise
 
 
-def batch_normalize_model(dataset_dir, model_name, result_dir=None, method='batch_cells'):
+def batch_normalize_model(dataset_name, model_name, config_path):
     """
     Apply batch normalization to a specific model.
     
     Args:
-        dataset_dir: Dataset directory containing data.h5ad and config.yaml
+        dataset_name: Dataset name (e.g., 'limb', 'liver')
         model_name: Name of the model to normalize
-        result_dir: Result directory (default: {dataset_dir}/../Result/{dataset_name})
-        method: Batch correction method ('batch_cells', 'batch_celltypes', 'pca_debias')
+        config_path: Path to config.yaml
     """
     logger.info(f"------ Starting: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
     
-    # Infer result directory if not provided
-    if result_dir is None:
-        dataset_name = os.path.basename(dataset_dir)
-        result_dir = os.path.join(dataset_dir, '..', 'Result', dataset_name)
+    # Load configuration
+    config = load_config(config_path)
     
-    logger.info(f"Dataset directory: {dataset_dir}")
-    logger.info(f"Result directory: {result_dir}")
+    # Get dataset config
+    if dataset_name not in config['datasets']:
+        raise ValueError(f"Dataset '{dataset_name}' not found in config")
+    
+    dataset_config = config['datasets'][dataset_name]
+    dataset_dir = dataset_config['output_data_dir']
+    result_dir = dataset_config.get('output_res_dir',
+                                    os.path.join(dataset_dir, 'Result', dataset_name))
+    batch_key = dataset_config.get('batch_key', 'batch')
+    label_key = dataset_config.get('celltype_key', 'cell_type')
+    batch_correction_config = config.get('batch_correction', {})
+    
+    logger.info(f"Dataset: {dataset_name}")
     logger.info(f"Model: {model_name}")
-    logger.info(f"Method: {method}")
+    logger.info(f"Dataset dir: {dataset_dir}")
+    logger.info(f"Result dir: {result_dir}")
+    logger.info(f"Batch key: {batch_key}")
+    logger.info(f"Label key: {label_key}")
     
     # Create normalizer and run
     try:
-        normalizer = BatchNormalizer(dataset_dir, result_dir)
-        normalizer.normalize(model_name, method)
+        normalizer = BatchNormalizer(dataset_dir, result_dir, batch_key, label_key, batch_correction_config)
+        normalizer.normalize(model_name)
         
         logger.info(f"------ Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
         return True
@@ -406,15 +325,13 @@ if __name__ == '__main__':
         description='Apply batch effect correction to embeddings',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Methods:
-    batch_cells       - Subtract batch-wise mean embedding (all cells)
-    batch_celltypes   - Subtract batch-wise celltype-mean embedding
-    pca_debias        - Remove top principal components
+Batch Correction Method:
+    batch_cells - Subtract batch-wise mean embedding (all cells)
 
 Examples:
-    python batch_normalize.py --dataset /path/to/limb --model geneformer --method batch_cells
-    python batch_normalize.py --dataset /path/to/liver --model harmony --method pca_debias
-    python batch_normalize.py --dataset /path/to/immune --model uce --method batch_celltypes --result-dir /custom/path
+    python batch_normalize.py --dataset limb --model geneformer --config config.yaml
+    python batch_normalize.py --dataset Immune --model harmony --config config.yaml
+    python batch_normalize.py --dataset liver --model pca --config config.yaml
 
 Supported Models:
     - uce, cellplm, geneformer, genecompass, scfoundation, sccello, nicheformer, scgpt
@@ -426,7 +343,8 @@ Supported Models:
         '--dataset',
         type=str,
         required=True,
-        help='Dataset directory containing data.h5ad and config.yaml'
+        choices=['limb', 'liver', 'Immune', 'HLCA_assay', 'HLCA_disease', 'HLCA_sn'],
+        help='Dataset name'
     )
     parser.add_argument(
         '--model',
@@ -435,19 +353,12 @@ Supported Models:
         help='Model or algorithm name to batch normalize'
     )
     parser.add_argument(
-        '--method',
+        '--config',
         type=str,
-        default='batch_cells',
-        choices=['batch_cells', 'batch_celltypes', 'pca_debias'],
-        help='Batch correction method'
-    )
-    parser.add_argument(
-        '--result-dir',
-        type=str,
-        default=None,
-        help='Result directory (default: inferred from dataset path)'
+        required=True,
+        help='Path to config.yaml file'
     )
     
     args = parser.parse_args()
     
-    batch_normalize_model(args.dataset, args.model, args.result_dir, args.method)
+    batch_normalize_model(args.dataset, args.model, args.config)

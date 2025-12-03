@@ -4,14 +4,15 @@ Benchmark script: Evaluate embedding quality using scIB metrics.
 Computes biological conservation and batch correction metrics for integrated embeddings.
 
 Usage:
-    python benchmark.py --dataset /path/to/dataset --model {model_name}
-    python benchmark.py --dataset /path/to/dataset --result-dir /path/to/result --model geneformer
+    python benchmark.py --dataset limb --model geneformer --config config.yaml
+    python benchmark.py --dataset Immune --model harmony --config config.yaml
 """
 
+import argparse
 import os
 import sys
+import yaml
 import time
-import argparse
 import logging
 from datetime import datetime
 import warnings
@@ -23,10 +24,6 @@ import scanpy as sc
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
-# Set timezone
-os.environ['TZ'] = 'Asia/Shanghai'
-time.tzset()
-
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -34,50 +31,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def load_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
 class BenchmarkEvaluator:
     """Evaluate embedding quality using scIB metrics."""
     
-    def __init__(self, dataset_dir, result_dir=None):
+    def __init__(self, dataset_dir, result_dir, batch_key, label_key):
         """
         Initialize evaluator.
         
         Args:
-            dataset_dir: Directory containing standardized data.h5ad and config.yaml
+            dataset_dir: Directory containing standardized data.h5ad
             result_dir: Result directory containing Embeddings_{model}.h5ad
+            batch_key: Column name for batch/technical variation
+            label_key: Column name for cell type labels
         """
         self.dataset_dir = dataset_dir
         self.result_dir = result_dir
-        self.batch_key = None
-        self.label_key = None
-        self.pre_integrated_embedding_key = None
-        self.load_config()
-    
-    def load_config(self):
-        """Load batch_key and label_key from config.yaml."""
-        config_file = os.path.join(self.dataset_dir, 'config.yaml')
-        
-        if os.path.exists(config_file):
-            try:
-                import yaml
-                with open(config_file, 'r') as f:
-                    config = yaml.safe_load(f)
-                
-                if isinstance(config, dict):
-                    self.batch_key = config.get('batch_key', 'batch')
-                    self.label_key = config.get('celltype_key', 'cell_type')
-                    self.pre_integrated_embedding_key = config.get('pre_integrated_embedding_obsm_key', 'X_pca')
-                    
-                    logger.info(f"Loaded config: batch_key={self.batch_key}, label_key={self.label_key}")
-            except Exception as e:
-                logger.warning(f"Failed to load config.yaml: {e}")
-        
-        # Set defaults if not loaded from config
-        if not self.batch_key:
-            self.batch_key = 'batch'
-        if not self.label_key:
-            self.label_key = 'cell_type'
-        if not self.pre_integrated_embedding_key:
-            self.pre_integrated_embedding_key = 'X_pca'
+        self.batch_key = batch_key
+        self.label_key = label_key
+        self.pre_integrated_embedding_key = 'X_pca'
     
     def load_data(self, model_name):
         """Load integrated embedding data."""
@@ -135,7 +113,7 @@ class BenchmarkEvaluator:
             pcr_comparison=False
         )
         
-        # Run benchmarking (60% bio, 40% batch)
+        # Run benchmarking
         benchmarker = Benchmarker(
             adata,
             batch_key=self.batch_key,
@@ -186,29 +164,41 @@ class BenchmarkEvaluator:
             raise
 
 
-def benchmark_model(dataset_dir, model_name, result_dir=None):
+def benchmark_model(dataset_name, model_name, config_path):
     """
     Run benchmark for a specific model.
     
     Args:
-        dataset_dir: Dataset directory containing data.h5ad and config.yaml
-        model_name: Name of the model to benchmark
-        result_dir: Result directory (default: {dataset_dir}/../Result/{dataset_name})
+        dataset_name: Dataset name (e.g., 'limb', 'liver')
+        model_name: Model name to benchmark
+        config_path: Path to config.yaml
     """
     logger.info(f"------ Starting: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
     
-    # Infer result directory if not provided
-    if result_dir is None:
-        dataset_name = os.path.basename(dataset_dir)
-        result_dir = os.path.join(dataset_dir, '..', 'Result', dataset_name)
+    # Load configuration
+    config = load_config(config_path)
     
-    logger.info(f"Dataset directory: {dataset_dir}")
-    logger.info(f"Result directory: {result_dir}")
+    # Get dataset config
+    if dataset_name not in config['datasets']:
+        raise ValueError(f"Dataset '{dataset_name}' not found in config")
+    
+    dataset_config = config['datasets'][dataset_name]
+    dataset_dir = dataset_config['output_data_dir']
+    result_dir = dataset_config.get('output_res_dir',
+                                    os.path.join(dataset_dir, 'Result', dataset_name))
+    batch_key = dataset_config.get('batch_key', 'batch')
+    label_key = dataset_config.get('celltype_key', 'cell_type')
+    
+    logger.info(f"Dataset: {dataset_name}")
     logger.info(f"Model: {model_name}")
+    logger.info(f"Dataset dir: {dataset_dir}")
+    logger.info(f"Result dir: {result_dir}")
+    logger.info(f"Batch key: {batch_key}")
+    logger.info(f"Label key: {label_key}")
     
     # Create evaluator and run
     try:
-        evaluator = BenchmarkEvaluator(dataset_dir, result_dir)
+        evaluator = BenchmarkEvaluator(dataset_dir, result_dir, batch_key, label_key)
         results_df = evaluator.benchmark(model_name)
         
         if results_df is not None:
@@ -230,9 +220,9 @@ if __name__ == '__main__':
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    python benchmark.py --dataset /path/to/limb --model geneformer
-    python benchmark.py --dataset /path/to/liver --model harmony --result-dir /custom/path
-    python benchmark.py --dataset /path/to/immune --model pca
+    python benchmark.py --dataset limb --model geneformer --config config.yaml
+    python benchmark.py --dataset Immune --model harmony --config config.yaml
+    python benchmark.py --dataset liver --model pca --config config.yaml
 
 Supported Models:
     - uce, cellplm, geneformer, genecompass, scfoundation, sccello, nicheformer, scgpt
@@ -244,7 +234,8 @@ Supported Models:
         '--dataset',
         type=str,
         required=True,
-        help='Dataset directory containing data.h5ad and config.yaml'
+        choices=['limb', 'liver', 'Immune', 'HLCA_assay', 'HLCA_disease', 'HLCA_sn'],
+        help='Dataset name'
     )
     parser.add_argument(
         '--model',
@@ -253,20 +244,12 @@ Supported Models:
         help='Model or algorithm name to benchmark'
     )
     parser.add_argument(
-        '--result-dir',
+        '--config',
         type=str,
-        default=None,
-        help='Result directory (default: inferred from dataset path)'
+        required=True,
+        help='Path to config.yaml file'
     )
     
     args = parser.parse_args()
     
-    benchmark_model(args.dataset, args.model, args.result_dir)
-    
-    config = {}
-    if args.config and os.path.exists(args.config):
-        import yaml
-        with open(args.config, 'r') as f:
-            config = yaml.safe_load(f)
-    
-    run_benchmark(args.dataset, config)
+    benchmark_model(args.dataset, args.model, args.config)

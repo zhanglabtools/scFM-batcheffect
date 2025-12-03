@@ -5,16 +5,18 @@ Extract NicheFormer embeddings
 NicheFormer is a single-cell foundation model trained on spatial transcriptomics data
 It uses hierarchical attention and preserves spatial neighborhood information
 
-Input: {dataset_dir}/geneformer/adata.h5ad (uses same format as GeneFormer)
-Output: {dataset_dir}/../Result/{dataset_name}/nicheformer/adata_nicheformer.h5ad
+Input: {output_data_dir}/geneformer/adata.h5ad
+Output: {output_res_dir}/nicheformer/adata_nicheformer.h5ad
 """
 
+import argparse
 import os
 import sys
-import argparse
+import yaml
 import logging
 import time
 from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import torch
@@ -23,19 +25,24 @@ from torch.utils.data import DataLoader
 import anndata as ad
 from tqdm import tqdm
 
-# Set timezone
 os.environ['TZ'] = 'Asia/Shanghai'
 time.tzset()
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Import NicheFormer
-from nicheformer.models import Nicheformer
-from nicheformer.data import NicheformerDataset
+
+def load_config(config_path):
+    """Load configuration from YAML file."""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
 
 
-def align_to_model(model: ad.AnnData, adata: ad.AnnData, fill_value: float = 0.0) -> ad.AnnData:
+def align_to_model(model, adata, fill_value=0.0):
     """
     Align adata to model's feature (gene) set, ensuring column order matches model.
     Missing genes are padded with zeros.
@@ -74,22 +81,50 @@ def align_to_model(model: ad.AnnData, adata: ad.AnnData, fill_value: float = 0.0
     return adata_aligned
 
 
-def extract_nicheformer(dataset_dir, gpu_id=0, batch_size=32):
+def extract_nicheformer(dataset_name, config_path):
     """
     Extract NicheFormer embeddings.
     
     Args:
-        dataset_dir: Dataset directory containing 'geneformer/adata.h5ad'
-        gpu_id: GPU device ID to use
-        batch_size: Inference batch size
+        dataset_name: Dataset name (e.g., 'limb', 'liver')
+        config_path: Path to config.yaml
     """
-    logger.info(f"Starting NicheFormer embedding extraction from {dataset_dir}")
+    logger.info("Starting NicheFormer embedding extraction")
+    
+    # Load configuration
+    config = load_config(config_path)
+    
+    # Get dataset config
+    if dataset_name not in config['datasets']:
+        raise ValueError(f"Dataset '{dataset_name}' not found in config")
+    
+    dataset_config = config['datasets'][dataset_name]
+    output_data_dir = dataset_config['output_data_dir']
+    output_res_dir = dataset_config.get('output_res_dir',
+                                        os.path.join(output_data_dir, 'Result', dataset_name))
+    
+    # Get model config
+    nf_config = config['model_paths']['nicheformer']
+    model_checkpoint = nf_config['model_dir']
+    technology_mean_path = nf_config['technology_mean_path']
+    data_model_path = nf_config['model_reference_path']
+    gpu_id = nf_config.get('gpu', 0)
+    batch_size = nf_config.get('batch_size', 32)
+    max_seq_len = nf_config.get('max_seq_len', 1500)
+    aux_tokens = nf_config.get('aux_tokens', 30)
+    chunk_size = nf_config.get('chunk_size', 1000)
+    num_workers = nf_config.get('num_workers', 4)
+    
+    logger.info(f"Dataset: {dataset_name}")
+    logger.info(f"Data dir: {output_data_dir}")
+    logger.info(f"Result dir: {output_res_dir}")
+    logger.info(f"GPU: {gpu_id}, Batch size: {batch_size}")
     
     # Set GPU device
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     
     # Check input file
-    input_file = os.path.join(dataset_dir, 'geneformer', 'adata.h5ad')
+    input_file = os.path.join(output_data_dir, 'geneformer', 'adata.h5ad')
     if not os.path.exists(input_file):
         raise FileNotFoundError(f"GeneFormer h5ad not found at {input_file}")
     
@@ -97,28 +132,19 @@ def extract_nicheformer(dataset_dir, gpu_id=0, batch_size=32):
     adata = ad.read_h5ad(input_file)
     logger.info(f"Input data shape: {adata.shape}")
     
-    # Extract dataset name from path
-    dataset_name = os.path.basename(dataset_dir)
-    
     # Create output directory
-    result_dir = os.path.join(dataset_dir, '..', 'Result', dataset_name, 'nicheformer')
+    result_dir = os.path.join(output_res_dir, 'nicheformer')
     os.makedirs(result_dir, exist_ok=True)
     logger.info(f"Output directory: {result_dir}")
     
-    # Model configuration
-    model_checkpoint = "/home/wanglinting/LCBERT/Download/nicheformer/nicheformer.ckpt"
-    technology_mean_path = "/home/wanglinting/LCBERT/Download/nicheformer/data/model_means/dissociated_mean_script.npy"
-    data_model_path = "/home/wanglinting/LCBERT/Download/nicheformer/data/model_means/model.h5ad"
+    # Check model resources exist
+    for path, name in [(model_checkpoint, 'Model checkpoint'),
+                       (technology_mean_path, 'Technology mean'),
+                       (data_model_path, 'Model reference')]:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"{name} not found at {path}")
     
-    if not os.path.exists(model_checkpoint):
-        raise FileNotFoundError(f"NicheFormer model not found at {model_checkpoint}")
-    if not os.path.exists(technology_mean_path):
-        raise FileNotFoundError(f"Technology mean file not found at {technology_mean_path}")
-    if not os.path.exists(data_model_path):
-        raise FileNotFoundError(f"Model reference data not found at {data_model_path}")
-    
-    logger.info(f"Model checkpoint: {model_checkpoint}")
-    logger.info(f"Loading reference model for gene alignment...")
+    logger.info("Loading model reference and technology mean...")
     adata_model = ad.read_h5ad(data_model_path)
     technology_mean = np.load(technology_mean_path)
     
@@ -128,10 +154,21 @@ def extract_nicheformer(dataset_dir, gpu_id=0, batch_size=32):
     logger.info(f"Aligned data shape: {adata_aligned.shape}")
     
     # Add required metadata columns
-    adata_aligned.obs['modality'] = 3  # dissociated
-    adata_aligned.obs['specie'] = 5  # human
-    adata_aligned.obs['assay'] = 12  # 10x 3' v2
+    adata_aligned.obs['modality'] = nf_config.get('modality_code', 3)
+    adata_aligned.obs['specie'] = nf_config.get('specie_code', 5)
+    adata_aligned.obs['assay'] = nf_config.get('assay_code', 12)
     adata_aligned.obs['nicheformer_split'] = 'train'
+    
+    logger.info("Importing NicheFormer...")
+    code_path = nf_config.get('code_path')
+    if code_path and code_path not in sys.path:
+        sys.path.insert(0, code_path)
+    
+    try:
+        from nicheformer.models import Nicheformer
+        from nicheformer.data import NicheformerDataset
+    except ImportError as e:
+        raise ImportError(f"Failed to import NicheFormer: {e}")
     
     logger.info("Creating NicheFormer dataset...")
     
@@ -140,9 +177,9 @@ def extract_nicheformer(dataset_dir, gpu_id=0, batch_size=32):
         adata=adata_aligned,
         technology_mean=technology_mean,
         split='train',
-        max_seq_len=1500,
-        aux_tokens=30,
-        chunk_size=1000,
+        max_seq_len=max_seq_len,
+        aux_tokens=aux_tokens,
+        chunk_size=chunk_size,
         metadata_fields={'obs': ['modality', 'specie', 'assay']}
     )
     
@@ -151,7 +188,7 @@ def extract_nicheformer(dataset_dir, gpu_id=0, batch_size=32):
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
+        num_workers=num_workers,
         pin_memory=True
     )
     
@@ -163,14 +200,6 @@ def extract_nicheformer(dataset_dir, gpu_id=0, batch_size=32):
         strict=False
     )
     model.eval()
-    
-    # Configure trainer
-    trainer = pl.Trainer(
-        accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        devices=1,
-        default_root_dir=result_dir,
-        precision=32,
-    )
     
     logger.info("Extracting embeddings...")
     embeddings = []
@@ -185,7 +214,7 @@ def extract_nicheformer(dataset_dir, gpu_id=0, batch_size=32):
             # Get embeddings from the model
             emb = model.get_embeddings(
                 batch=batch,
-                layer=-1  # Last layer
+                layer=-1
             )
             embeddings.append(emb.cpu().numpy())
     
@@ -198,20 +227,33 @@ def extract_nicheformer(dataset_dir, gpu_id=0, batch_size=32):
     
     # Save result
     output_file = os.path.join(result_dir, "adata_nicheformer.h5ad")
-    adata.write_h5ad(output_file)
+    adata.write_h5ad(output_file, compression='gzip')
     logger.info(f"Saved output to {output_file}")
     
     logger.info("✓ NicheFormer embedding extraction complete")
+    logger.info(f"Results saved to {result_dir}")
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(description='Extract NicheFormer embeddings')
-    parser.add_argument('--dataset', type=str, required=True, help='Dataset directory')
-    parser.add_argument('--gpu', type=int, default=0, help='GPU device ID (default: 0)')
-    parser.add_argument('--batch-size', type=int, default=32, help='Batch size for inference (default: 32)')
+    parser.add_argument('--dataset', type=str, required=True,
+                        choices=['limb', 'liver', 'Immune', 'HLCA_assay', 'HLCA_disease', 'HLCA_sn'],
+                        help='Dataset name')
+    parser.add_argument('--config', type=str, required=True,
+                        help='Path to config.yaml file')
     
     args = parser.parse_args()
     
     logger.info(f"------ Starting: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
-    extract_nicheformer(args.dataset, gpu_id=args.gpu, batch_size=args.batch_size)
-    logger.info(f"------ Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
+    
+    try:
+        extract_nicheformer(args.dataset, args.config)
+        logger.info(f"------ Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
+    except Exception as e:
+        logger.error(f"Extraction failed: {e}")
+        logger.error(f"------ Error: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
+        raise
+
+
+if __name__ == '__main__':
+    main()

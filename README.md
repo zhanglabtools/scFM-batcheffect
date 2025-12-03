@@ -1,456 +1,270 @@
-# scFM: Single-cell Foundation Model Evaluation Framework
+# Batch Effects Remain a Fundamental Barrier to Universal Embeddings in Single-Cell Foundation Models
 
-## Project Overview
 
-**scFM** is a comprehensive single-cell foundation model evaluation pipeline designed to systematically assess the performance of different single-cell gene expression embedding models on 6 biomedical datasets.
-
-### Core Features
-
-- **Multi-Model Support**: Integrates 8 state-of-the-art single-cell foundation models
-- **Multi-Dataset Evaluation**: Standardized evaluation on 6 multi-species, multi-tissue datasets
-- **Complete Evaluation Pipeline**: End-to-end workflow from data preprocessing to result visualization
-- **Batch Effect Correction**: Integrated evaluation with 3 batch correction methods
-- **Upstream Task Evaluation**: Verify embedding quality through linear probing
+## Abstract
+Constructing a cell universe requires integrating heterogeneous single-cell RNA-seq datasets, which is hindered by diverse batch effects. Single-cell foundation models (scFMs), inspired by large language models, aim to learn universal cellular embeddings from large-scale single-cell data. However, unlike language, single-cell data are sparse, noisy, and strongly affected by batch artifacts, limiting cross-dataset transferability. Our systematic evaluation across diverse batch scenarios reveals that current scFMs fail to intrinsically remove batch effects, with batch signals persisting in pretrained embeddings. Post-hoc batch-centering partially improves alignment, highlighting the need for future scFMs to integrate explicit batch-effect correction mechanisms to achieve true universal cellular embeddings.
 
 ---
 
 ## Project Structure
 
 ```
-scFM/
-├── Src/
-│   ├── config_loader.py              # Unified configuration loader
-│   ├── config.yaml                   # Central configuration file
-│   ├── run_dataset.sh               # Dataset evaluation entry point
-│   ├── run.sh                        # Project entry point
-│   │
-│   └── core_pipeline/               # 7-stage evaluation pipeline
-│       ├── 0_data_preprocess/      # Stage 0: Data preprocessing & standardization
-│       ├── 1_data_model_preparation/  # Stage 1: Model-specific data preparation
-│       ├── 2_extract_embedding/    # Stage 2: Embedding extraction
-│       ├── 3_integration/          # Stage 3: Embedding integration & visualization
-│       ├── 4_benchmark/            # Stage 4: scIB metrics benchmarking
-│       ├── 5_batch_correction/     # Stage 5: Batch effect correction
-│       └── 6_probing/              # Stage 6: Linear probing analysis
-│
-├── Data/
-│   ├── download/                    # Downloaded raw data
-│   └── Evaluation/                  # Dataset preprocessing output
-│
-└── Result/                          # Final evaluation results
-    └── {dataset_name}/
-        ├── {model_name}/
-        │   ├── Embeddings_{model_name}.h5ad
-        │   ├── benchmark/           # scIB metrics results
-        │   └── probing_original/    # Linear probing results
-        └── metrics_summary.csv      # Aggregated results table
-
+scFM-batcheffect/
+├── config.yaml                    # Configuration file
+├── run.sh                         # Master pipeline (all stages, all datasets)
+├── README.md                      # This file
+| 
+├── figures/                       # Figure plotting Jupyter files 
+|
+└── core_pipeline/                 # Evaluation pipeline
+    ├── 0_data_preprocess/         # Step 0: Data preprocessing & standardization
+    ├── 1_data_model_preparation/  # Step 1: Model-specific data preparation
+    ├── 2_extract_embedding/       # Step 2: Embedding extraction
+    ├── 3_integration/             # Step 3: Embedding integration & visualization
+    ├── 4_benchmark/               # Step 4: scIB metrics benchmarking
+    ├── 5_batch_correction/        # Step 5: Batch-centering correction
+    └── 6_probing/                 # Step 6: Linear probing analysis
 ```
 
 ---
 
-## Supported Models
+## Models
 
-### Embedding Models (7)
+### Foundation Models
+- [scGPT](https://github.com/bowang-lab/scGPT) 
+- [GeneFormer](https://huggingface.co/ctheodoris/Geneformer) 
+- [GeneCompass](https://github.com/xCompass-AI/GeneCompass)
+- [scFoundation](https://github.com/biomap-research/scFoundation)
+- [UCE](https://github.com/snap-stanford/UCE)
+- [CellPLM](https://github.com/OmicsML/CellPLM)
+- [scCello](https://github.com/DeepGraphLearning/scCello)
+- [NicheFormer](https://github.com/theislab/nicheformer)
 
-| Model Name | Dimension | Training Data Scale | Type |
-|---------|------|-----------|------|
-| **GeneFormer** | 1152 | 30M cells | Transformer |
-| **GeneCompass** | 768 | 10M+ cells | BERT + multi-modal |
-| **scFoundation** | 512 | Large-scale | Foundation Model |
-| **UCE** | 1280 | Public datasets | Universal embedding |
-| **CellPLM** | 768 | Pre-trained | PLM |
-| **scCello** | 768 | Specific data | Autoencoder |
-| **NicheFormer** | 768 | Spatial transcriptomics | Spatial-aware |
+### Integration Methods
+All the traditional integration methods can be applied using [scIB](https://github.com/theislab/scib)
+ - **PCA** 
+ - **Harmony**
+ - **Scanorama**
+ - **scVI** 
 
-### Integration Methods (3)
 
-- **PCA**: Principal Component Analysis
-- **Harmony**: Batch-aware integration
-- **Scanorama**: Panoramic integration
+## Datasets
+ - [limb](https://cellxgene.cziscience.com/collections/4fefa187-5d14-4f1e-915b-c892ed320aab) 
+ - [liver](https://cellxgene.cziscience.com/collections/ff69f0ee-fef6-4895-9f48-6c64a68c8289) 
+ - [Immune](https://cellxgene.cziscience.com/collections/cc431242-35ea-41e1-a100-41e0dec2665b) 
+ - [HLCA](https://cellxgene.cziscience.com/collections/6f6d381a-7701-4781-935c-db10d30de293) 
 
-### Batch Correction Methods (3)
-
-- **batch_cells**: Batch-level mean centering
-- **batch_celltypes**: Cell type-level batch processing
-- **pca_debias**: Principal component removal
-
----
-
-## Supported Datasets
-
-| Dataset | Samples | Cells | Species | Tissue/Type |
-|------|------|------|------|---------|
-| **limb** | 12 | ~100k | Human+Mouse | Limb development |
-| **liver** | 8-10 | ~100k | Human | Liver |
-| **immune** | Multiple | ~500k | Human | Immune cells |
-| **HLCA** | 16 | ~660k | Human | Lung |
-| **huaxi** | 5 | ~60k | Human | Clinical samples |
-| **idtrack** | Multiple | Mixed | Mixed | Other |
 
 ---
 
-## Quick Start
+## Usage
 
 ### 1. Environment Setup
+
+#### Base Environment
+
+First, create a conda environment with common dependencies:
 
 ```bash
 # Create conda environment
 conda create -n scfm python=3.10
 conda activate scfm
 
-# Install dependencies
-pip install scanpy anndata pandas numpy torch matplotlib scikit-learn pyyaml
+# Install common dependencies
+pip install scanpy anndata pandas numpy matplotlib scikit-learn pyyaml 
 
-# Model-specific dependencies (as needed)
-pip install scib_metrics scvi-tools harmony scanorama
+# Install evaluation and integration methods
+pip install scib scib_metrics scvi-tools harmony-py scanorama
 ```
+
+#### Foundation Model-Specific Environment Setup
+
+Each foundation model has different dependencies and require separate environments. Please refer to the respective tutorials of each model for deployment
+
 
 ### 2. Configure config.yaml
 
-Edit `Src/config.yaml`:
+Edit `config.yaml` to set up paths for your datasets and models:
 
 ```yaml
+
+# Model directory paths
 model_paths:
   geneformer:
-    model_dir: /path/to/geneformer/model
-    code_path: /path/to/geneformer/code
-    
+    code_path: "/path/to/geneformer/code"
+    model_path: "/path/to/geneformer/model"
+    gpu: 0
+    batch_size: 32
+
+  scfoundation:
+    code_path: "/path/to/scfoundation/code"
+    model_path: "/path/to/scfoundation/model"
+    gpu: 1
+    batch_size: 32
+
+  # ... other models
+
+# Datasets
 datasets:
   limb:
-    input_dir: /path/to/limb/data
-    output_dir: /path/to/limb/output
+    raw_data: "/path/to/limb/raw.h5ad"
+    output_data_dir: "/path/to/limb/processed"
+    output_res_dir: "/path/to/limb/results"
+    batch_key: "batch"
+    celltype_key: "cell_type"
+
+  liver:
+    raw_data: "/path/to/liver/raw.h5ad"
+    output_data_dir: "/path/to/liver/processed"
+    output_res_dir: "/path/to/liver/results"
+    batch_key: "batch"
+    celltype_key: "cell_type"
+
+  # ... other datasets
+
+# Probing configuration
+probing:
+  n_splits: 5
+  max_workers: 4
+
+# Batch correction configuration
+batch_correction:
+  batch_cells:
+    max_cells_per_batch: 10000
+    random_seed: 42
+    normalize: true
 ```
 
 ### 3. Run the Evaluation Pipeline
 
-#### Method 1: Run complete pipeline via run_dataset.sh
+#### Option A: Run Full Pipeline (All Stages, All Datasets)
 
 ```bash
-cd Src
-./run_dataset.sh limb
+bash run.sh
 ```
 
-#### Method 2: Run stage by stage
+This will execute all 6 stages sequentially for all datasets and models.
+
+#### Option B: Run Pipeline Step by Step (Recommended)
+
+Because deploying multiple foundation models in the same environment is challenging, it's best to run stages one by one, switching between model-specific environments as needed.
+
+##### Stage 0: Data Preprocessing
+
+Run once for all datasets:
 
 ```bash
-cd Src/core_pipeline
+cd core_pipeline
 
-# Stage 0: Data preprocessing
-python 0_data_preprocess/data_preprocess.py --dataset /path/to/limb
+# Preprocess limb dataset
+python 0_data_preprocess/data_preprocess.py \
+    --dataset limb \
+    --config ../config.yaml
 
-# Stage 1: Model preparation
-for model in geneformer cellplm uce; do
-    python 1_data_model_preparation/prepare_${model}.py --dataset /path/to/limb
-done
+# Preprocess other datasets
+python 0_data_preprocess/data_preprocess.py \
+    --dataset liver \
+    --config ../config.yaml
 
-# Stage 2: Embedding extraction
-for model in geneformer cellplm uce; do
-    python 2_extract_embedding/extract_embedding_${model}.py --dataset /path/to/limb
-done
+python 0_data_preprocess/data_preprocess.py \
+    --dataset Immune \
+    --config ../config.yaml
 
-# Stage 3: Integration
-cd 3_integration
-./run_all.sh /path/to/limb
-
-# Stage 4: Benchmarking
-cd ../4_benchmark
-./run_all.sh /path/to/limb
-
-# Stage 5: Batch correction
-cd ../5_batch_correction
-./batch_normalize_run_all.sh /path/to/limb
-
-# Stage 6: Linear probing
-cd ../6_probing
-python probing_main.py --dataset /path/to/limb --model geneformer
+# ... other datasets
 ```
 
----
+##### Stage 1: Model-Specific Data Preparation
 
-## Pipeline Stages Detailed Explanation
+Run all models for each dataset:
 
-### Stage 0: Data Preprocessing (`0_data_preprocess`)
-
-**Purpose**: Standardize heterogeneous h5ad files from CELLxGENE into a unified format
-
-**Input**: Raw CELLxGENE h5ad files (downloaded via wget)
-
-**Output**: Standardized `data.h5ad` containing:
-- X: log1p normalized count matrix
-- obs: Cell metadata (cell type, batch, donor, etc.)
-- var: Gene metadata
-- layers['counts']: Raw counts (for certain models)
-
-**Dataset-specific logic**:
-
-```python
-def preprocess_limb():
-    # Cross-species alignment (human+mouse)
-    # Cell type annotation unification
-    # Batch effect assessment
-
-def preprocess_liver():
-    # Quality control filtering
-    # Cell type subset selection
-    # Donor information preservation
-
-def preprocess_immune():
-    # Large-scale filtering
-    # Cell type mapping to standard ontology
-    # Donor stratification
-```
-
-**Usage**:
 ```bash
-python data_preprocess.py --dataset /path/to/dataset
+# For limb dataset, prepare all model-specific data
+python 1_data_model_preparation/prepare_geneformer.py --dataset limb --config ../config.yaml
+python 1_data_model_preparation/prepare_uce.py --dataset limb --config ../config.yaml
+python 1_data_model_preparation/prepare_cellplm.py --dataset limb --config ../config.yaml
+bash 1_data_model_preparation/prepare_sccello.sh --dataset limb --config ../config.yaml
+
+# Repeat for other datasets
 ```
 
----
+##### Stage 2: Embedding Extraction
 
-### Stage 1: Data Model Preparation (`1_data_model_preparation`)
+Extract embeddings for each model. **Note:** Each model may require a different environment setup.
 
-**Purpose**: Prepare model-specific input formats for each model
-
-**Standard processing**:
-
-| Model | Processing | Output Format |
-|------|------|--------|
-| **GeneFormer** | Copy counts→X<br/>Add ensembl_id<br/>Add n_counts | h5ad |
-| **GeneCompass** | Gene name→ID<br/>Z-score filtering<br/>Token encoding<br/>Log1p + Rank values | HuggingFace Dataset |
-| **CellPLM** | Unique var_names | h5ad |
-| **scFoundation** | Subset to 19264 genes<br/>Sparse matrix format | .npz |
-| **UCE** | var_names→gene symbols | h5ad |
-| **scCello** | Custom preprocessing | - |
-| **NicheFormer** | Same as GeneFormer | h5ad |
-
-**Usage**:
 ```bash
-python prepare_geneformer.py --dataset /path/to/dataset
-python prepare_genecompass.py --dataset /path/to/dataset
-# ... etc
+# === Switch to GeneFormer environment ===
+conda activate geneformer-env
+python 2_extract_embedding/extract_embedding_geneformer.py \
+    --dataset limb --config ../config.yaml
+
+# === Switch to UCE environment ===
+conda activate uce-env
+bash 2_extract_embedding/extract_embedding_UCE.sh \
+    --dataset limb --config ../config.yaml
+
+# Repeat for other models and datasets
 ```
 
----
+##### Stage 3: Integration
 
-### Stage 2: Embedding Extraction (`2_extract_embedding`)
-
-**Purpose**: Generate cell embeddings using pre-trained models
-
-**Output location**: `Result/{dataset_name}/{model_name}/`
-
-**File formats**:
-- GeneFormer: `*_emb.csv` (batches)
-- GeneCompass: `cell_embeddings.npy`
-- scFoundation: `benchmark_*.npy`
-- UCE: `adata_uce_*.h5ad`
-- Others: Model-specific formats
-
-**Usage**:
 ```bash
-python extract_embedding_geneformer.py --dataset /path/to/dataset --gpu-id 0
-python extract_embedding_genecompass.py --dataset /path/to/dataset
-# ... etc
+
+python 3_integration/integrate.py \
+    --dataset limb --model uce --config ../config.yaml
+
+# === Switch to CellPLM environment ===
+python 3_integration/integrate.py \
+    --dataset limb --model cellplm --config ../config.yaml
+
+python 3_integration/integrate.py \
+    --dataset limb --model harmony --config ../config.yaml
+
+# Repeat for other models and datasets
 ```
 
-**GPU allocation**: Configure GPU ID for each model in config.yaml
+##### Stage 4: Benchmarking
 
----
+Evaluate embedding quality using scIB metrics:
 
-### Stage 3: Integration (`3_integration`)
-
-**Purpose**: Integrate model embeddings with original data and compute UMAP visualization
-
-**Processing workflow**:
-1. Load original `data.h5ad`
-2. Load model-specific embeddings
-3. Integrate into `adata.obsm['X_emb']`
-4. Compute UMAP: `adata.obsm['X_umap']`
-5. Save as `Embeddings_{model}.h5ad`
-
-**Usage**:
 ```bash
-cd 3_integration
-./run_all.sh /path/to/dataset /path/to/result
+# Benchmark all models on limb dataset
+python 4_benchmark/benchmark.py \
+    --dataset limb --model uce --config ../config.yaml
+
+python 4_benchmark/benchmark.py \
+    --dataset limb --model geneformer --config ../config.yaml
+
+# ... benchmark all models on all datasets
 ```
 
-**Processor**:
-```python
-python integrate.py --dataset /path/to/dataset --model geneformer --result-dir /path/to/result
-```
+##### Stage 5: Batch Correction
 
----
+Apply batch-centering correction to embeddings:
 
-### Stage 4: Benchmarking (`4_benchmark`)
-
-**Purpose**: Evaluate embedding quality using scIB metrics
-
-**Evaluation metrics**:
-
-**Biological conservation**:
-- NMI (Normalized Mutual Information): Cell type label preservation
-- ARI (Adjusted Rand Index): Clustering preservation
-
-**Batch effect removal**:
-- Batch correction index: Batch mixing degree
-- GraphConnectivity: Graph connectivity
-
-**Technical metrics**:
-- Silhouette score: Cell type separation degree
-- Isolation index
-
-**Usage**:
 ```bash
-cd 4_benchmark
-./run_all.sh /path/to/dataset /path/to/result
+# Batch correct all models on limb dataset
+python 5_batch_correction/batch_normalize.py \
+    --dataset limb --model uce --config ../config.yaml
+
+python 5_batch_correction/batch_normalize.py \
+    --dataset limb --model geneformer --config ../config.yaml
+
+# ... batch correct all models on all datasets
 ```
 
-**Processor**:
-```python
-python benchmark.py --dataset /path/to/dataset --model geneformer --result-dir /path/to/result
-```
+##### Stage 6: Linear Probing Analysis
 
----
+Evaluate embeddings on downstream classification tasks:
 
-### Stage 5: Batch Correction (`5_batch_correction`)
-
-**Purpose**: Apply batch correction methods and re-evaluate
-
-**Methods**:
-
-1. **batch_cells** (Simple):
-   ```
-   X_corrected = X - batch_mean[batch_id]
-   ```
-
-2. **batch_celltypes** (Moderate):
-   ```
-   X_corrected = X - batch_celltype_mean[batch_id, celltype]
-   ```
-
-3. **pca_debias** (PCA debiasing):
-   ```
-   Remove top N principal components from X_emb
-   ```
-
-**Output**: `Embeddings_{model}_batch_corrected.h5ad` containing `X_emb_batch`
-
-**Usage**:
 ```bash
-cd 5_batch_correction
-./batch_normalize_run_all.sh /path/to/dataset /path/to/result batch_cells
-./batch_normalize_run_all.sh /path/to/dataset /path/to/result batch_celltypes
-./batch_normalize_run_all.sh /path/to/dataset /path/to/result pca_debias
+# Original embeddings
+python 6_probing/probing_main.py \
+    --dataset limb --model uce --config ../config.yaml
+
+# Batch-corrected embeddings
+python 6_probing/probing_main.py \
+    --dataset limb --model uce --batch-center --config ../config.yaml
+
+# ... run probing for all models on all datasets
 ```
 
----
-
-### Stage 6: Linear Probing (`6_probing`)
-
-**Purpose**: Evaluate embeddings through 5-fold cross-validated linear classification
-
-**Workflow**:
-1. **Data splitting**: Create 5-fold CV splits
-2. **Feature extraction**: Extract from `X_emb` or `X_emb_batch`
-3. **Training**: Use logistic regression or SVM for each fold
-4. **Evaluation**: Compute 4 classification metrics
-5. **Aggregation**: Average results across 5 folds
-
-**Classification tasks**:
-- **Primary task**: Cell type classification
-- **Batch task** (optional): Batch ID prediction
-- **Supervised task** (optional): Other metadata
-
-**Output**:
-```
-probing_original/
-├── cv_results_summary.csv        # 5-fold average results
-├── fold_{0-4}/
-│   ├── predictions.csv           # Predictions
-│   └── metrics.json              # Per-fold metrics
-└── plots/
-    ├── confusion_matrix.png
-    └── roc_curves.png
-```
-
-**Usage**:
-```bash
-python probing_main.py --dataset /path/to/dataset --model geneformer
-python probing_main.py --dataset /path/to/dataset --model geneformer --type batch_normalized
-```
-
-**CLI arguments**:
-- `--dataset`: Dataset directory (required)
-- `--model`: Model name, e.g., 'geneformer' (required)
-- `--type`: 'original' or 'batch_normalized' (default: original)
-- `--result-dir`: Result directory (default: auto-inferred)
-
-
-
-## References
-
-### Model Papers
-
-- **GeneFormer**: https://www.nature.com/articles/s41467-023-43139-9
-- **GeneCompass**: [Citation pending]
-- **scFoundation**: https://www.biorxiv.org/content/10.1101/2023.11.28.568918
-- **UCE**: [Citation]
-- **scGPT**: https://www.nature.com/articles/s41467-024-45749-5
-
-### scIB Benchmark
-
-- Paper: https://www.nature.com/articles/s41592-021-01336-8
-- Code: https://github.com/theislab/scib
-
-### Data Sources
-
-- CELLxGENE: https://cellxgene.cziscience.com/
-- HLCA: https://www.tissue-atlas.org/
-
----
-
-## License and Citation
-
-If you use this project, please cite:
-
-```bibtex
-@software{scfm2025,
-  title={scFM: Single-cell Foundation Model Evaluation Framework},
-  author={Your Name},
-  year={2025},
-  url={https://github.com/yourrepo/scfm}
-}
-```
-
----
-
-## Support and Contact
-
-- **Bug Reports**: Submit GitHub Issues
-- **Feature Requests**: Create GitHub Discussion
-- **Technical Support**: [contact info]
-
----
-
-## Changelog
-
-### v1.0.0 (2025-11-19)
-
-- ✅ Core pipeline implementation (7 stages)
-- ✅ 8 model integration
-- ✅ 6 dataset support
-- ✅ scIB benchmarking
-- ✅ Linear probing analysis
-- ✅ Batch effect correction
-- ✅ Central configuration system
-
-### Known Issues
-
-- [ ] NicheFormer GPU memory optimization
-- [ ] scGPT multi-GPU support
-- [ ] Large dataset streaming processing
-
----
-
-**Last Updated**: 2025-11-19  
-**Status**: Production Ready ✅

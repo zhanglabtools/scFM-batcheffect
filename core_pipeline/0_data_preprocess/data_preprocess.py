@@ -10,6 +10,12 @@ Datasets:
   - HLCA_assay: HLCA human lung assay (filtered by study and assay type)
   - HLCA_disease: HLCA human lung disease (filtered by study and disease)
   - HLCA_sn: HLCA human lung single-nucleus (filtered by suspension type)
+
+Usage example:
+python data_preprocess.py --dataset limb --config path/to/config.yaml
+
+The resulting preprocessed data.h5ad will be saved in output_data_dir.
+
 """
 
 import argparse
@@ -35,16 +41,15 @@ def load_config(config_path):
     return config
 
 
-def preprocess_limb(config):
+def preprocess_limb(dataset_config):
     """
     Preprocess limb dataset: human + mouse cross-species alignment.
     """
     logger.info("Preprocessing limb dataset...")
     
     # Read human and mouse data
-    adata_human = sc.read_h5ad(config['human_path'])
-    adata_mouse = sc.read_h5ad(config['mouse_path'])
-    logger.info(f"Human data: {adata_human.shape}, Mouse data: {adata_mouse.shape}")
+    adata_human = sc.read_h5ad(dataset_config['human_path'])
+    adata_mouse = sc.read_h5ad(dataset_config['mouse_path'])
     
     # Set X to None, then extract raw counts from .raw attribute
     adata_human.X = None
@@ -57,10 +62,9 @@ def preprocess_limb(config):
     
     # Filter mouse data by sequencing center
     adata_mouse = adata_mouse[adata_mouse.obs["sequencing_center"] == "Sanger"]
-    logger.info(f"After filtering: Mouse data {adata_mouse.shape}")
     
     # Load homology mapping
-    homology = pd.read_csv(config['homology_path'])
+    homology = pd.read_csv(dataset_config['homology_path'])
     homology = homology.rename(columns={
         "Gene stable ID": "human_ensembl",
         "Mouse gene stable ID": "mouse_ensembl",
@@ -107,17 +111,19 @@ def preprocess_limb(config):
     
     # Clear unnecessary structures
     adata.obsm.clear()
-    
+    adata.obs.drop("leiden", axis=1, inplace=True)
+
+
     return adata
 
 
-def preprocess_liver(config):
+def preprocess_liver(dataset_config):
     """
     Preprocess liver dataset: filter unknown cell types.
     """
     logger.info("Preprocessing liver dataset...")
     
-    adata = sc.read_h5ad(config['data_path'])
+    adata = sc.read_h5ad(dataset_config['data_path'])    
     logger.info(f"Raw data: {adata.shape}")
     
     # Filter unknown cell types
@@ -136,13 +142,13 @@ def preprocess_liver(config):
     return adata
 
 
-def preprocess_immune(config):
+def preprocess_immune(dataset_config):
     """
     Preprocess immune dataset: extract single donor D529 and create cell type annotations.
     """
     logger.info("Preprocessing immune dataset...")
     
-    adata_raw = sc.read_h5ad(config['data_path'])
+    adata_raw = sc.read_h5ad(dataset_config['data_path'])
     logger.info(f"Raw data: {adata_raw.shape}")
     
     # Filter by donor D529
@@ -196,17 +202,6 @@ def preprocess_immune(config):
     
     adata.obs["cell_type_level_2"] = adata.obs["cell_type"].map(mapping_level_2)
     
-    # Level 1: gross cell type categories
-    mapping_level_1 = {
-        "t_cell": "T cells",
-        "b_cell": "B cells",
-        "myeloid": "Myeloid cells",
-        "nk_ilc": "NK/ILCs",
-        "mast_cell": "Mast cells",
-        "progenitor": "Progenitor cells"
-    }
-    
-    adata.obs["cell_type_level_1"] = adata.obs["Gross_annotation"].map(mapping_level_1)
     logger.info("Cell type annotations created")
     
     # Set X to None, then extract raw counts from .raw attribute
@@ -221,20 +216,55 @@ def preprocess_immune(config):
     return adata
 
 
-def preprocess_hlca_assay(config):
+def preprocess_hlca_assay(dataset_config):
     """
     Preprocess HLCA assay dataset: filter by study.
     """
     logger.info("Preprocessing HLCA assay dataset...")
     
-    adata_raw = sc.read_h5ad(config['data_path'])
+    adata_raw = sc.read_h5ad(dataset_config['data_path'])
     logger.info(f"Raw data: {adata_raw.shape}")
     
     # Filter by studies
-    studies = config.get('studies', ["Sun_2020", "Meyer_2019"])
-    adata = adata_raw[adata_raw.obs['study'].isin(studies)].copy()
+    adata = adata_raw[adata_raw.obs['disease'].isin(["normal"]) & adata_raw.obs['study'].isin(["Meyer_2019", "Schiller_2020"]), :]
     logger.info(f"After filtering studies: {adata.shape}")
     
+    final_label_map = {
+        "Basal": "ann_level_3",
+        "Multiciliated lineage": "ann_level_3",
+        "Secretory": "ann_level_3",
+        "AT1": "ann_level_3",
+        "AT2": "ann_level_3",
+        "Blood vessels": "ann_level_2",
+        "Lymphatic EC": "ann_level_2",
+        "Fibroblast lineage": "ann_level_2",
+        "Smooth muscle": "ann_level_2",
+        "B cell lineage": "ann_level_3",
+        "T cell lineage": "ann_level_3",
+        "Innate lymphoid cell NK": "ann_level_3",
+        "Dendritic cells": "ann_level_3",
+        "Macrophages": "ann_level_3",  
+        "Monocytes": "ann_level_3",
+        "Mast cells": "ann_level_3",
+    }
+
+    # 构建反向映射：原始注释值 -> 最终注释
+    reverse_map = {}
+    for final_label, level in final_label_map.items():
+        reverse_map.setdefault(level, {})[final_label] = final_label
+
+    # 构建最终注释列
+    def assign_final_label(row):
+        for final_label, level in final_label_map.items():
+            if row[level] == final_label:
+                return final_label
+        return "Unknown"
+
+    adata.obs["final_annotation"] = adata.obs.apply(assign_final_label, axis=1)
+    adata.obs["final_annotation"] = adata.obs["final_annotation"].astype("category")
+    # 去掉Unknown
+    adata = adata[adata.obs["final_annotation"] != "Unknown", :]
+
     # Set X to None, then extract raw counts from .raw attribute
     adata.X = None
     adata.X = adata.raw.X
@@ -247,20 +277,55 @@ def preprocess_hlca_assay(config):
     return adata
 
 
-def preprocess_hlca_disease(config):
+def preprocess_hlca_disease(dataset_config):
     """
     Preprocess HLCA disease dataset: filter by study.
     """
     logger.info("Preprocessing HLCA disease dataset...")
     
-    adata_raw = sc.read_h5ad(config['data_path'])
+    adata_raw = sc.read_h5ad(dataset_config['data_path'])
     logger.info(f"Raw data: {adata_raw.shape}")
     
     # Filter by studies
-    studies = config.get('studies', ["Sun_2020", "Meyer_2019"])
-    adata = adata_raw[adata_raw.obs['study'].isin(studies)].copy()
+    adata = adata_raw[adata_raw.obs['study'].isin(["Thienpont_2018", "Meyer_2019"]), :]
     logger.info(f"After filtering studies: {adata.shape}")
     
+    final_label_map = {
+        "Basal": "ann_level_3",
+        "Multiciliated lineage": "ann_level_3",
+        "Secretory": "ann_level_3",
+        "AT1": "ann_level_3",
+        "AT2": "ann_level_3",
+        "Blood vessels": "ann_level_2",
+        "Lymphatic EC": "ann_level_2",
+        "Fibroblast lineage": "ann_level_2",
+        "Smooth muscle": "ann_level_2",
+        "B cell lineage": "ann_level_3",
+        "T cell lineage": "ann_level_3",
+        "Innate lymphoid cell NK": "ann_level_3",
+        "Dendritic cells": "ann_level_3",
+        "Macrophages": "ann_level_3",  
+        "Monocytes": "ann_level_3",
+        "Mast cells": "ann_level_3",
+    }
+
+    # 构建反向映射：原始注释值 -> 最终注释
+    reverse_map = {}
+    for final_label, level in final_label_map.items():
+        reverse_map.setdefault(level, {})[final_label] = final_label
+
+    # 构建最终注释列
+    def assign_final_label(row):
+        for final_label, level in final_label_map.items():
+            if row[level] == final_label:
+                return final_label
+        return "Unknown"
+
+    adata.obs["final_annotation"] = adata.obs.apply(assign_final_label, axis=1)
+    adata.obs["final_annotation"] = adata.obs["final_annotation"].astype("category")
+    # 去掉Unknown
+    adata = adata[adata.obs["final_annotation"] != "Unknown", :]
+
     # Set X to None, then extract raw counts from .raw attribute
     adata.X = None
     adata.X = adata.raw.X
@@ -273,20 +338,56 @@ def preprocess_hlca_disease(config):
     return adata
 
 
-def preprocess_hlca_sn(config):
+def preprocess_hlca_sn(dataset_config):
     """
     Preprocess HLCA single-nucleus dataset: filter by study.
     """
     logger.info("Preprocessing HLCA single-nucleus dataset...")
     
-    adata_raw = sc.read_h5ad(config['data_path'])
+    adata_raw = sc.read_h5ad(dataset_config['data_path'])
     logger.info(f"Raw data: {adata_raw.shape}")
     
     # Filter by studies
-    studies = config.get('studies', ["Sun_2020", "Meyer_2019"])
+    studies = ["Sun_2020", "Meyer_2019"]
     adata = adata_raw[adata_raw.obs['study'].isin(studies)].copy()
     logger.info(f"After filtering studies: {adata.shape}")
     
+    final_label_map = {
+        "Basal": "ann_level_3",
+        "Multiciliated lineage": "ann_level_3",
+        "Secretory": "ann_level_3",
+        "AT1": "ann_level_3",
+        "AT2": "ann_level_3",
+        "Blood vessels": "ann_level_2",
+        "Lymphatic EC": "ann_level_2",
+        "Fibroblast lineage": "ann_level_2",
+        "Smooth muscle": "ann_level_2",
+        "B cell lineage": "ann_level_3",
+        "T cell lineage": "ann_level_3",
+        "Innate lymphoid cell NK": "ann_level_3",
+        "Dendritic cells": "ann_level_3",
+        "Macrophages": "ann_level_3",  
+        "Monocytes": "ann_level_3",
+        "Mast cells": "ann_level_3",
+    }
+
+    # 构建反向映射：原始注释值 -> 最终注释
+    reverse_map = {}
+    for final_label, level in final_label_map.items():
+        reverse_map.setdefault(level, {})[final_label] = final_label
+
+    # 构建最终注释列
+    def assign_final_label(row):
+        for final_label, level in final_label_map.items():
+            if row[level] == final_label:
+                return final_label
+        return "Unknown"
+
+    adata.obs["final_annotation"] = adata.obs.apply(assign_final_label, axis=1)
+    adata.obs["final_annotation"] = adata.obs["final_annotation"].astype("category")
+    # 去掉Unknown
+    adata = adata[adata.obs["final_annotation"] != "Unknown", :]
+
     # Set X to None, then extract raw counts from .raw attribute
     adata.X = None
     adata.X = adata.raw.X
@@ -299,7 +400,7 @@ def preprocess_hlca_sn(config):
     return adata
 
 
-def standardize_preprocessing(adata, config):
+def standardize_preprocessing(adata, dataset_config):
     """
     Apply standard preprocessing steps to all datasets.
     - Save raw counts to layers['counts']
@@ -328,28 +429,18 @@ def standardize_preprocessing(adata, config):
     logger.info(f"Data normalized and log-transformed")
     
     # Feature selection and dimensionality reduction
-    batch_key = config.get('batch_key', 'batch')
+    batch_key = dataset_config.get('batch_key', 'batch')
     if batch_key in adata.obs.columns:
         scib.pp.reduce_data(
             adata, 
-            n_top_genes=config.get('n_top_genes', 2000),
+            n_top_genes=2000,
             batch_key=batch_key,
             pca=True,
             neighbors=False
         )
         logger.info(f"Feature selection and PCA done (batch-aware)")
     else:
-        logger.warning(f"Batch key '{batch_key}' not found in obs, using non-batch-aware feature selection")
-        sc.pp.highly_variable_genes(adata, n_top_genes=config.get('n_top_genes', 2000))
-        adata.X = adata.X[:, adata.var['highly_variable']]
-        sc.pp.pca(adata, n_comps=50)
-        logger.info(f"Feature selection and PCA done")
-    
-    # Drop unnecessary columns
-    cols_to_drop = [col for col in adata.obs.columns if col in ['leiden', 'leiden_R']]
-    if cols_to_drop:
-        adata.obs.drop(cols_to_drop, axis=1, inplace=True)
-        logger.info(f"Dropped unnecessary obs columns: {cols_to_drop}")
+        raise ValueError(f"Batch key '{batch_key}' not found in adata.obs")
     
     return adata
 
@@ -361,39 +452,44 @@ def main():
                         help='Dataset name')
     parser.add_argument('--config', type=str, required=True,
                         help='Path to config.yaml file')
-    parser.add_argument('--output', type=str, default='data.h5ad',
-                        help='Output file path (default: data.h5ad)')
+
     
     args = parser.parse_args()
     
     # Load configuration
     config = load_config(args.config)
     
+    # Extract dataset-specific configuration
+    dataset_config = config['datasets'][args.dataset]
+    logger.info(f"Loading dataset configuration for: {args.dataset}")
+
     # Dataset-specific preprocessing
     if args.dataset == 'limb':
-        adata = preprocess_limb(config)
+        adata = preprocess_limb(dataset_config)
     elif args.dataset == 'liver':
-        adata = preprocess_liver(config)
+        adata = preprocess_liver(dataset_config)
     elif args.dataset == 'Immune':
-        adata = preprocess_immune(config)
+        adata = preprocess_immune(dataset_config)
     elif args.dataset == 'HLCA_assay':
-        adata = preprocess_hlca_assay(config)
+        adata = preprocess_hlca_assay(dataset_config)
     elif args.dataset == 'HLCA_disease':
-        adata = preprocess_hlca_disease(config)
+        adata = preprocess_hlca_disease(dataset_config)
     elif args.dataset == 'HLCA_sn':
-        adata = preprocess_hlca_sn(config)
+        adata = preprocess_hlca_sn(dataset_config)
     else:
         raise ValueError(f"Unknown dataset: {args.dataset}")
     
     # Standardized preprocessing
-    adata = standardize_preprocessing(adata, config)
+    adata = standardize_preprocessing(adata, dataset_config)
     
-    # Save output
-    os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
-    adata.write_h5ad(args.output, compression='gzip')
-    logger.info(f"Saved preprocessed data to {args.output}")
+    # Save output to output_data_dir
+    output_dir = dataset_config['output_data_dir']
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, 'data.h5ad')
+    adata.write_h5ad(output_path, compression='gzip')
+    logger.info(f"Saved preprocessed data to {output_path}")
     logger.info(f"Final shape: {adata.shape}")
-
 
 if __name__ == '__main__':
     main()
+
