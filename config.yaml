@@ -1,0 +1,270 @@
+# Unified configuration for scFM evaluation pipeline
+# All dataset paths, model paths, and parameters are centralized here
+
+# Global settings
+pipeline_version: "1.0"
+timezone: "Asia/Shanghai"
+
+# Model directory paths - where downloaded models are stored
+model_paths:
+  geneformer:
+    model_dir: "/home/wanglinting/LCBERT/Download/GeneformerV2/Geneformer-V2-316M"
+    token_dict: "/home/wanglinting/LCBERT/Download/GeneformerV2/geneformer/token_dictionary_gc104M.pkl"
+    code_path: "/home/wanglinting/LCBERT/Code/model-geneformer"
+    gpu: 0
+    batch_size: 32
+  
+  genecompass:
+    model_dir: "/home/wanglinting/LCBERT/Download/GeneCompass"
+    code_path: "/home/wanglinting/LCBERT/Code/model-genecompass"
+    scdata_dir: "/home/wanglinting/LCBERT/Download/GeneCompass/scdata"
+    resources:
+      dict_path: "/home/wanglinting/LCBERT/Download/GeneCompass/scdata/dict/human_gene_median_after_filter.pickle"
+      token_path: "/home/wanglinting/LCBERT/Download/GeneCompass/scdata/dict/human_mouse_tokens.pickle"
+      gene_id_name_path: "/home/wanglinting/LCBERT/Download/GeneCompass/scdata/dict/Gene_id_name_dict1.pickle"
+      gene_id_path: "/home/wanglinting/LCBERT/Download/GeneCompass/scdata/dict/gene_id_hpromoter.pickle"
+      protein_coding_path: "/home/wanglinting/LCBERT/Download/GeneCompass/scdata/human_protein_coding.txt"
+      mirna_path: "/home/wanglinting/LCBERT/Download/GeneCompass/scdata/human_miRNA.txt"
+      mitochondria_path: "/home/wanglinting/LCBERT/Download/GeneCompass/scdata/human_mitochondria.xlsx"
+    gpu: 1
+    batch_size: 32
+  
+  cellplm:
+    model_dir: "/home/wanglinting/LCBERT/Download/CellPLM"
+    code_path: "/home/wanglinting/LCBERT/Code/CellPLM"
+    gpu: 2
+    batch_size: 32
+  
+  uce:
+    model_dir: "/home/wanglinting/LCBERT/Download/UCE"
+    code_path: "/home/wanglinting/LCBERT/Code/model-uce"
+    model_path: "/home/wanglinting/LCBERT/Code/model-uce/model_files/33l_8ep_1024t_1280.torch"
+    gpu: 3
+    batch_size: 32
+  
+  scfoundation:
+    model_dir: "/home/wanglinting/LCBERT/Download/scFoundation"
+    code_path: "/home/wanglinting/LCBERT/Code/model-scFoundation"
+    gene_list: "/home/wanglinting/LCBERT/Code/model-scFoundation/OS_scRNA_gene_index.19264.tsv"
+    model_path: "/home/wanglinting/LCBERT/Download/scFoundation-main/model/models/models.ckpt"
+    gpu: 4
+    batch_size: 32
+  
+  sccello:
+    model_dir: "/home/wanglinting/LCBERT/Download/scCello"
+    code_path: "/home/wanglinting/LCBERT/Code/model-sccello"
+    transformation_script: "/home/wanglinting/LCBERT/Code/model-sccello/sccello/script/run_data_transformation.py"
+    pretrained_ckpt: "/home/wanglinting/LCBERT/Download/scCello/scCello-zeroshot"
+    gpu: 5
+    batch_size: 32
+  
+  scgpt:
+    model_dir: "/home/wanglinting/LCBERT/Download/scGPT/model/scGPT_human"
+    code_path: "/home/wanglinting/LCBERT/Code/model-scgpt"
+    gpu: 6
+    batch_size: 32
+  
+  nicheformer:
+    model_dir: "/home/wanglinting/LCBERT/Download"
+    code_path: "/home/wanglinting/LCBERT/Code/model-nicheformer"
+    gpu: 7
+    batch_size: 32
+
+# Code repository paths
+code_paths:
+  lcbert_base: "/home/wanglinting/LCBERT"
+  geneformer_code: "/home/wanglinting/LCBERT/Code/model-geneformer"
+  genecompass_code: "/home/wanglinting/LCBERT/Code/model-genecompass"
+  cellplm_code: "/home/wanglinting/LCBERT/Code/CellPLM"
+  scfoundation_code: "/home/wanglinting/LCBERT/Code/model-scFoundation"
+  sccello_code: "/home/wanglinting/LCBERT/Code/model-sccello"
+  nicheformer_code: "/home/wanglinting/LCBERT/Code/model-nicheformer"
+
+# Data source paths - where raw data is located
+data_sources:
+  cellxgene_base: "/home/wanglinting/scFM/Data/CELLxGENE"
+  hlca_base: "/home/wanglinting/LCBERT/Download/HLCA"
+
+# Output base directory
+output_base: "/home/wanglinting/scFM/Data/Evaluation"
+
+# Preprocessing parameters
+preprocessing:
+  n_top_genes: 2000
+  min_cells: 3
+  min_genes: 200
+
+# Embedding extraction parameters
+embedding:
+  # GeneFormer
+  geneformer_batch_size: 32
+  geneformer_gpu: 0
+  
+  # GeneCompass
+  genecompass_batch_size: 32
+  genecompass_gpu: 1
+  
+  # CellPLM
+  cellplm_batch_size: 32
+  cellplm_gpu: 2
+  
+  # UCE
+  uce_batch_size: 32
+  uce_gpu: 3
+  
+  # scFoundation
+  scfoundation_batch_size: 32
+  scfoundation_gpu: 4
+
+# Integration parameters
+integration:
+  scvi_epochs: 100
+  harmony_theta: 2.0
+  scanorama_knn: 15
+  pca_components: 30
+
+# Benchmarking parameters
+benchmarking:
+  n_jobs: 4
+  n_neighbors: 15
+  biocons_weight: 0.6
+  batchcor_weight: 0.4
+  use_highly_variable_genes: true
+
+# Batch correction parameters
+batch_correction:
+  methods:
+    - batch_cells
+    - batch_celltypes
+    - pca_debias
+  
+  batch_cells:
+    max_cells_per_batch: 10000
+    random_seed: 42
+    normalize: true
+  
+  batch_celltypes:
+    normalize: true
+  
+  pca_debias:
+    n_components: 1
+    normalize: true
+
+# Probing parameters
+probing:
+  cv_folds: 5
+  test_size: 0.2
+  random_seed: 42
+  classifiers:
+    - logistic_regression
+    - svm
+    - random_forest
+    - mlp
+    - knn
+
+# Dataset configurations
+datasets:
+  
+  limb:
+    description: "Cross-species limb tissue dataset"
+    human_path: "/home/wanglinting/scFM/Data/CELLxGENE/limb_human.h5ad"
+    mouse_path: "/home/wanglinting/scFM/Data/CELLxGENE/limb_mouse.h5ad"
+    homology_path: "/home/wanglinting/scFM/Data/CELLxGENE/mart_export.txt"
+    output_dir: "/home/wanglinting/scFM/Data/Evaluation/limb"
+    sequencing_center_col: "sequencing_center"
+    sequencing_center_filter: "Sanger"
+    batch_key: "organism"
+    celltype_key: "cell_type"
+    n_top_genes: 2000
+    models:
+      - geneformer
+      - genecompass
+      - scFoundation
+      - scCello
+      - UCE
+      - nicheformer
+  
+  liver:
+    description: "Liver tissue dataset"
+    data_path: "/home/wanglinting/scFM/Data/CELLxGENE/liver.h5ad"
+    output_dir: "/home/wanglinting/scFM/Data/Evaluation/liver"
+    celltype_col: "cell_type"
+    batch_key: "donor_id"
+    celltype_key: "cell_type"
+    n_top_genes: 2000
+    models:
+      - geneformer
+      - genecompass
+      - scFoundation
+      - scCello
+      - UCE
+      - nicheformer
+  
+  Immune:
+    description: "Immune cells dataset"
+    data_path: "/home/wanglinting/scFM/Data/CELLxGENE/immune_cells.h5ad"
+    output_dir: "/home/wanglinting/scFM/Data/Evaluation/Immune"
+    celltype_col: "cell_type"
+    batch_key: "batch"
+    celltype_key: "cell_type"
+    n_top_genes: 2000
+    models:
+      - geneformer
+      - genecompass
+      - scFoundation
+      - scCello
+      - UCE
+      - nicheformer
+  
+  HLCA_assay:
+    description: "HLCA dataset - Assay"
+    data_path: "/home/wanglinting/LCBERT/Download/HLCA/HLCA_rawcount.h5ad"
+    output_dir: "/home/wanglinting/scFM/Data/Evaluation/HLCA_assay"
+    studies:
+      - "Sun_2020"
+      - "Meyer_2019"
+      - "Adams_2020"
+    batch_key: "assay"
+    celltype_key: "ann_level_2"
+    n_top_genes: 2000
+    models:
+      - geneformer
+      - genecompass
+      - scFoundation
+      - scCello
+      - UCE
+      - nicheformer
+  
+  HLCA_disease:
+    description: "HLCA dataset - Disease"
+    data_path: "/home/wanglinting/LCBERT/Download/HLCA/HLCA_rawcount.h5ad"
+    output_dir: "/home/wanglinting/scFM/Data/Evaluation/HLCA_disease"
+    studies:
+      - "Sun_2020"
+      - "Meyer_2019"
+    batch_key: "disease"
+    celltype_key: "ann_level_2"
+    n_top_genes: 2000
+    models:
+      - geneformer
+      - genecompass
+      - scFoundation
+      - scCello
+      - UCE
+      - nicheformer
+  
+  HLCA_sn:
+    description: "HLCA dataset - Single-nucleus"
+    data_path: "/home/wanglinting/LCBERT/Download/HLCA/HLCA_rawcount.h5ad"
+    output_dir: "/home/wanglinting/scFM/Data/Evaluation/HLCA_sn"
+    assay_filter: "snRNA-seq"
+    batch_key: "organism"
+    celltype_key: "ann_level_2"
+    n_top_genes: 2000
+    models:
+      - geneformer
+      - genecompass
+      - scFoundation
+      - scCello
+      - UCE
+      - nicheformer
