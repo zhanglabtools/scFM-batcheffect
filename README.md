@@ -6,7 +6,7 @@ Constructing a cell universe requires integrating heterogeneous single-cell RNA-
 
 ---
 
-## Project Structure
+## Structure of this repository
 
 ```
 scFM-batcheffect/
@@ -28,7 +28,7 @@ scFM-batcheffect/
 
 ---
 
-## Models
+## Resources of Models and Datasets
 
 ### Foundation Models
 - [scGPT](https://github.com/bowang-lab/scGPT) 
@@ -48,7 +48,7 @@ All the traditional integration methods can be applied using [scIB](https://gith
  - **scVI** 
 
 
-## Datasets
+### Datasets
  - [limb](https://cellxgene.cziscience.com/collections/4fefa187-5d14-4f1e-915b-c892ed320aab) 
  - [liver](https://cellxgene.cziscience.com/collections/ff69f0ee-fef6-4895-9f48-6c64a68c8289) 
  - [Immune](https://cellxgene.cziscience.com/collections/cc431242-35ea-41e1-a100-41e0dec2665b) 
@@ -213,6 +213,7 @@ python 3_integration/integrate.py \
     --dataset limb --model uce --config ../config.yaml
 
 # === Switch to CellPLM environment ===
+conda activate cellplm-env
 python 3_integration/integrate.py \
     --dataset limb --model cellplm --config ../config.yaml
 
