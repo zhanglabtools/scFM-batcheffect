@@ -107,14 +107,14 @@ model_paths:
 # Datasets
 datasets:
   limb:
-    raw_data: "/path/to/limb/raw.h5ad"
+    data_path: "/path/to/limb/raw.h5ad"
     output_data_dir: "/path/to/limb/processed"
     output_res_dir: "/path/to/limb/results"
     batch_key: "batch"
     celltype_key: "cell_type"
 
   liver:
-    raw_data: "/path/to/liver/raw.h5ad"
+    data_path: "/path/to/liver/raw.h5ad"
     output_data_dir: "/path/to/liver/processed"
     output_res_dir: "/path/to/liver/results"
     batch_key: "batch"
