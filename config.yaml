@@ -34,9 +34,9 @@ model_paths:
 
   cellplm:
     model_dir: "/home/wanglinting/scFM/Download/CellPLM"
-    code_path: "/home/wanglinting/scFM/Download/CellPLM"
+    pretrain_directory: "/home/wanglinting/LCBERT/Download/CellPLM/ckpt"
+    pretrain_version: "20231027_85M"
     gpu: 2
-    batch_size: 32
   
   uce:
     code_path: "/home/wanglinting/scFM/Download/UCE"

@@ -95,18 +95,53 @@ class EmbeddingIntegrator:
         logger.info(f"Loaded UCE embedding: {embedding.shape}")
         return embedding
     
-    def load_embedding_cellplm(self, model_result_dir):
-        """Load CellPLM embedding from h5ad."""
-        emb_files = glob.glob(os.path.join(model_result_dir, '*.h5ad'))
+def load_embedding_cellplm(self, model_result_dir):
+    """Load CellPLM embedding by running model inference."""
+    try:
+        import sys
+        module_path = self.config.get('model_paths', {}).get('cellplm', {}).get('module_path')
+        if not module_path:
+            raise ValueError("CellPLM module_path not found in config")
         
-        if not emb_files:
-            raise FileNotFoundError(f"No CellPLM h5ad found in {model_result_dir}")
+        sys.path.insert(0, module_path)
+        from CellPLM.pipeline.cell_embedding import CellEmbeddingPipeline
         
-        adata_emb = sc.read_h5ad(emb_files[0])
-        embedding = adata_emb.obsm.get('X_cellplm', adata_emb.obsm.get('X_emb', adata_emb.X))
+        logger.info("Running CellPLM embedding inference...")
         
+        # Get GPU and model config
+        gpu_id = self.config.get('model_paths', {}).get('cellplm', {}).get('gpu', 0)
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        
+        pretrain_version = self.config.get('model_paths', {}).get('cellplm', {}).get('pretrain_version', '20231027_85M')
+        pretrain_directory = self.config.get('model_paths', {}).get('cellplm', {}).get('pretrain_directory')
+        
+        if not pretrain_directory:
+            raise ValueError("CellPLM pretrain_directory not found in config")
+        
+        device = f'cuda:{gpu_id}'
+        
+        # Initialize pipeline
+        pipeline = CellEmbeddingPipeline(
+            pretrain_prefix=pretrain_version,
+            pretrain_directory=pretrain_directory
+        )
+        
+        # Run inference
+        embedding = pipeline.predict(
+            self.adata,
+            device=device,
+            inference_config={"batch_size": 2048},
+            ensembl_auto_conversion=False
+        )
+        
+        embedding = embedding.cpu().numpy()
         logger.info(f"Loaded CellPLM embedding: {embedding.shape}")
         return embedding
+    
+    except Exception as e:
+        logger.error(f"Failed to load CellPLM embedding: {e}")
+        raise
+
     
     def load_embedding_geneformer(self, model_result_dir):
         """Load GeneFormer embedding from CSV files."""
