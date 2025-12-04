@@ -155,8 +155,37 @@ def extract_nicheformer(dataset_name, config_path):
     
     # Add required metadata columns
     adata_aligned.obs['modality'] = nf_config.get('modality_code', 3)
-    adata_aligned.obs['specie'] = nf_config.get('specie_code', 5)
-    adata_aligned.obs['assay'] = nf_config.get('assay_code', 12)
+    # Map technology (assay) column
+    logger.info("Mapping technology codes...")
+    technology_dict = nf_config.get('technology_dict', {})
+    
+    if 'assay' in adata.obs.columns:
+        adata_aligned.obs['assay'] = adata.obs['assay'].map(technology_dict)
+        # default 10x 3' v2
+        adata_aligned.obs['assay'] = adata_aligned.obs['assay'].fillna(10).astype(int)
+        logger.info(f"Assay mapping result:\n{adata_aligned.obs['assay'].value_counts().sort_index()}")
+    else:
+        logger.warning("'assay' column not found in input data, using default 10")
+        adata_aligned.obs['assay'] = 10
+    
+    # Map species column
+    logger.info("Mapping species codes...")
+    species_dict = nf_config.get('species_dict', {})
+    
+    if 'specie' in adata.obs.columns:
+        adata_aligned.obs['specie'] = adata.obs['specie'].map(species_dict)
+        # default human
+        adata_aligned.obs['specie'] = adata_aligned.obs['specie'].fillna(5).astype(int)
+        logger.info(f"Species mapping result:\n{adata_aligned.obs['specie'].value_counts().sort_index()}")
+    elif 'organism' in adata.obs.columns:
+        adata_aligned.obs['specie'] = adata.obs['organism'].map(species_dict)
+        adata_aligned.obs['specie'] = adata_aligned.obs['specie'].fillna(5).astype(int)
+        logger.info(f"Species mapping result:\n{adata_aligned.obs['specie'].value_counts().sort_index()}")
+    else:
+        logger.warning("'specie' or 'organism' column not found, using default 5 (human)")
+        adata_aligned.obs['specie'] = 5
+
+    
     adata_aligned.obs['nicheformer_split'] = 'train'
     
     logger.info("Importing NicheFormer...")

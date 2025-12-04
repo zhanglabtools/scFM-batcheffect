@@ -52,7 +52,7 @@ def load_config(config_path):
 class EmbeddingIntegrator:
     """Integrate embeddings from different models."""
     
-    def __init__(self, dataset_dir, result_dir, config):
+    def __init__(self, dataset_dir, result_dir, config, dataset_name):
         """
         Initialize integrator.
         
@@ -60,10 +60,13 @@ class EmbeddingIntegrator:
             dataset_dir: Directory containing standardized data.h5ad
             result_dir: Result directory containing embeddings
             config: Configuration dictionary
+            dataset_name: Name of the dataset
         """
         self.dataset_dir = dataset_dir
         self.result_dir = result_dir
         self.config = config
+        self.dataset_name = dataset_name
+        self.dataset_config = config['datasets'][dataset_name]
         self.adata = None
     
     def load_data(self):
@@ -81,68 +84,65 @@ class EmbeddingIntegrator:
     # ===========================
     # EMBEDDING MODEL LOADERS
     # ===========================
-    
     def load_embedding_uce(self, model_result_dir):
         """Load UCE embedding from h5ad."""
-        emb_files = glob.glob(os.path.join(model_result_dir, 'adata_uce_*.h5ad'))
+        emb_file = os.path.join(model_result_dir, 'adata_uce_adata.h5ad')
         
-        if not emb_files:
+        if not os.path.exists(emb_file):
             raise FileNotFoundError(f"No UCE embedding h5ad found in {model_result_dir}")
         
-        adata_emb = sc.read_h5ad(emb_files[0])
-        embedding = adata_emb.obsm.get('X_uce', adata_emb.X)
-        
-        logger.info(f"Loaded UCE embedding: {embedding.shape}")
-        return embedding
-    
-def load_embedding_cellplm(self, model_result_dir):
-    """Load CellPLM embedding by running model inference."""
-    try:
-        import sys
-        module_path = self.config.get('model_paths', {}).get('cellplm', {}).get('module_path')
-        if not module_path:
-            raise ValueError("CellPLM module_path not found in config")
-        
-        sys.path.insert(0, module_path)
-        from CellPLM.pipeline.cell_embedding import CellEmbeddingPipeline
-        
-        logger.info("Running CellPLM embedding inference...")
-        
-        # Get GPU and model config
-        gpu_id = self.config.get('model_paths', {}).get('cellplm', {}).get('gpu', 0)
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-        
-        pretrain_version = self.config.get('model_paths', {}).get('cellplm', {}).get('pretrain_version', '20231027_85M')
-        pretrain_directory = self.config.get('model_paths', {}).get('cellplm', {}).get('pretrain_directory')
-        
-        if not pretrain_directory:
-            raise ValueError("CellPLM pretrain_directory not found in config")
-        
-        device = f'cuda:{gpu_id}'
-        
-        # Initialize pipeline
-        pipeline = CellEmbeddingPipeline(
-            pretrain_prefix=pretrain_version,
-            pretrain_directory=pretrain_directory
-        )
-        
-        # Run inference
-        embedding = pipeline.predict(
-            self.adata,
-            device=device,
-            inference_config={"batch_size": 2048},
-            ensembl_auto_conversion=False
-        )
-        
-        embedding = embedding.cpu().numpy()
-        logger.info(f"Loaded CellPLM embedding: {embedding.shape}")
-        return embedding
-    
-    except Exception as e:
-        logger.error(f"Failed to load CellPLM embedding: {e}")
-        raise
+        adata_emb = sc.read_h5ad(emb_file)
+        embedding = adata_emb.obsm['X_emb']
+        self.adata.obsm['X_emb'] = embedding
 
+        logger.info(f"Integrated UCE embedding: {embedding.shape}")
     
+
+    def load_embedding_cellplm(self, model_result_dir):
+        """Load CellPLM embedding by running model inference."""
+        try:
+            module_path = self.config.get('model_paths', {}).get('cellplm', {}).get('module_path')
+            if not module_path:
+                raise ValueError("CellPLM module_path not found in config")
+            
+            sys.path.insert(0, module_path)
+            from CellPLM.pipeline.cell_embedding import CellEmbeddingPipeline
+            
+            logger.info("Running CellPLM embedding inference...")
+            
+            gpu_id = self.config.get('model_paths', {}).get('cellplm', {}).get('gpu_id', 0)
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+            
+            pretrain_version = self.config.get('model_paths', {}).get('cellplm', {}).get('pretrain_version', '20231027_85M')
+            pretrain_directory = self.config.get('model_paths', {}).get('cellplm', {}).get('pretrain_directory')
+            batch_size = self.config.get('model_paths', {}).get('cellplm', {}).get('batch_size', 2048)
+            
+            if not pretrain_directory:
+                raise ValueError("CellPLM pretrain_directory not found in config")
+            
+            device = f'cuda:{gpu_id}'
+            
+            pipeline = CellEmbeddingPipeline(
+                pretrain_prefix=pretrain_version,
+                pretrain_directory=pretrain_directory
+            )
+            
+            embedding = pipeline.predict(
+                self.adata,
+                device=device,
+                inference_config={"batch_size": batch_size},
+                ensembl_auto_conversion=False
+            )
+            
+            embedding = embedding.cpu().numpy()
+            self.adata.obsm['X_emb'] = embedding
+            logger.info(f"Integrated CellPLM embedding: {embedding.shape}")
+        
+        except Exception as e:
+            logger.error(f"Failed to load CellPLM embedding: {e}")
+            raise
+
+
     def load_embedding_geneformer(self, model_result_dir):
         """Load GeneFormer embedding from CSV files."""
         emb_files = glob.glob(os.path.join(model_result_dir, '*emb.csv'))
@@ -152,6 +152,8 @@ def load_embedding_cellplm(self, model_result_dir):
         
         logger.info(f"Found {len(emb_files)} GeneFormer embedding files")
         
+        embedding_dim = self.config.get('model_paths', {}).get('geneformer', {}).get('embedding_dim', 1152)
+        
         dfs = [pd.read_csv(f, index_col=0) for f in sorted(emb_files)]
         df = pd.concat(dfs, axis=0)
         
@@ -159,69 +161,62 @@ def load_embedding_cellplm(self, model_result_dir):
             df['cell_id'] = df['cell_id'].astype(str)
             self.adata.obs['cell_id'] = self.adata.obs['cell_id'].astype(str)
             df_aligned = df.set_index('cell_id').loc[self.adata.obs['cell_id']]
-            embedding = df_aligned.iloc[:, :1152].to_numpy()
+            embedding = df_aligned.iloc[:, :embedding_dim].to_numpy()
         else:
-            embedding = df.iloc[:, :1152].to_numpy()
+            embedding = df.iloc[:, :embedding_dim].to_numpy()
         
-        logger.info(f"Loaded GeneFormer embedding: {embedding.shape}")
-        return embedding
+        self.adata.obsm['X_emb'] = embedding
+        logger.info(f"Integrated GeneFormer embedding: {embedding.shape}")
+    
     
     def load_embedding_genecompass(self, model_result_dir):
         """Load GeneCompass embedding from NPY file."""
-        npy_files = glob.glob(os.path.join(model_result_dir, 'cell_embeddings.npy'))
+        npy_file = os.path.join(model_result_dir, 'cell_embeddings.npy')
         
-        if not npy_files:
-            npy_files = glob.glob(os.path.join(model_result_dir, '*embeddings.npy'))
-        
-        if not npy_files:
+        if not os.path.exists(npy_file):
             raise FileNotFoundError(f"No GeneCompass NPY file found in {model_result_dir}")
         
-        embedding = np.load(npy_files[0])
-        logger.info(f"Loaded GeneCompass embedding: {embedding.shape}")
-        return embedding
+        embedding = np.load(npy_file)
+        self.adata.obsm['X_emb'] = embedding
+        logger.info(f"Integrated GeneCompass embedding: {embedding.shape}")
     
     def load_embedding_scfoundation(self, model_result_dir):
         """Load scFoundation embedding from NPY file."""
-        npy_files = glob.glob(os.path.join(model_result_dir, 'benchmark_*.npy'))
+        npy_file = os.path.join(model_result_dir, 'benchmark_*.npy')
         
-        if not npy_files:
+        if not os.path.exists(npy_file):
             raise FileNotFoundError(f"No scFoundation NPY file found in {model_result_dir}")
         
-        embedding = np.load(npy_files[0])
-        logger.info(f"Loaded scFoundation embedding: {embedding.shape}")
-        return embedding
+        embedding = np.load(npy_file)
+        self.adata.obsm['X_emb'] = embedding
+        logger.info(f"Integrated scFoundation embedding: {embedding.shape}")
     
     def load_embedding_sccello(self, model_result_dir):
         """Load scCello embedding from NPY file."""
         emb_dir = os.path.join(model_result_dir, 'embeddings')
-        npy_files = glob.glob(os.path.join(emb_dir, '*.npy'))
+        npy_file = os.path.join(emb_dir, '*.npy')
         
-        if not npy_files:
-            npy_files = glob.glob(os.path.join(model_result_dir, '*.npy'))
-        
-        if not npy_files:
+        if not os.path.exists(npy_file):
             raise FileNotFoundError(f"No scCello NPY file found in {model_result_dir}")
         
-        embedding = np.load(npy_files[0])
-        logger.info(f"Loaded scCello embedding: {embedding.shape}")
-        return embedding
+        embedding = np.load(npy_file)
+        self.adata.obsm['X_emb'] = embedding
+        logger.info(f"Integrated scCello embedding: {embedding.shape}")
     
     def load_embedding_nicheformer(self, model_result_dir):
         """Load NicheFormer embedding from h5ad."""
         h5ad_files = glob.glob(os.path.join(model_result_dir, '*nicheformer*.h5ad'))
         
         if not h5ad_files:
-            h5ad_files = glob.glob(os.path.join(model_result_dir, '*.h5ad'))
-        
-        if not h5ad_files:
             raise FileNotFoundError(f"No NicheFormer h5ad found in {model_result_dir}")
         
         adata_emb = sc.read_h5ad(h5ad_files[0])
-        embedding = adata_emb.obsm.get('X_nicheformer', adata_emb.obsm.get('X_emb', adata_emb.X))
-        
-        logger.info(f"Loaded NicheFormer embedding: {embedding.shape}")
-        return embedding
+        embedding = adata_emb.obsm['X_emb']
+
+        self.adata.obsm['X_emb'] = embedding
+        logger.info(f"Integrated NicheFormer embedding: {embedding.shape}")
     
+
     def load_embedding_scgpt(self, model_result_dir):
         """Load scGPT embedding."""
         try:
@@ -229,42 +224,39 @@ def load_embedding_cellplm(self, model_result_dir):
             
             logger.info("Running scGPT embedding extraction...")
             
-            # Get GPU from config or use default
-            gpu_id = self.config.get('model_paths', {}).get('scgpt', {}).get('gpu_id', 7)
+            gpu_id = self.config.get('model_paths', {}).get('scgpt', {}).get('gpu_id', 6)
             os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
             
-            # Get model dir from config or use default
             model_dir = self.config.get('model_paths', {}).get('scgpt', {}).get('model_dir')
+            batch_size = self.config.get('model_paths', {}).get('scgpt', {}).get('batch_size', 32)
+
             if not model_dir:
                 raise ValueError("scGPT model_dir not found in config")
             
             if not os.path.exists(model_dir):
                 raise FileNotFoundError(f"scGPT model directory not found: {model_dir}")
             
-            gene_col = "original_gene_symbols"
+            gene_col = self.dataset_config.get('gene_col', 'original_gene_symbols')
             if gene_col not in self.adata.var.columns:
                 gene_col = self.adata.var.index.name or "index"
+                logger.warning(f"gene_col '{gene_col}' not found, using: {gene_col}")
             
             adata_emb = scg.tasks.embed_data(
                 self.adata,
                 model_dir,
                 gene_col=gene_col,
-                batch_size=128,
+                batch_size=batch_size,
             )
             
             embedding = adata_emb.obsm.get('X_scGPT', adata_emb.obsm.get('X_emb', adata_emb.X)).copy()
             self.adata = adata_emb
+            self.adata.obsm['X_emb'] = embedding
             
-            logger.info(f"Loaded scGPT embedding: {embedding.shape}")
-            return embedding
+            logger.info(f"Integrated scGPT embedding: {embedding.shape}")
         
         except Exception as e:
             logger.error(f"Failed to load scGPT: {e}")
             raise
-    
-    # ===========================
-    # INTEGRATION METHOD LOADERS
-    # ===========================
     
     def load_embedding_pca(self, model_result_dir):
         """Load PCA embedding from existing adata."""
@@ -272,8 +264,8 @@ def load_embedding_cellplm(self, model_result_dir):
             raise ValueError("PCA not found in adata.obsm")
         
         embedding = self.adata.obsm['X_pca'].copy()
-        logger.info(f"Loaded PCA embedding: {embedding.shape}")
-        return embedding
+        self.adata.obsm['X_emb'] = embedding
+        logger.info(f"Integrated PCA embedding: {embedding.shape}")
     
     def load_embedding_scvi(self, model_result_dir):
         """Run scVI integration."""
@@ -281,17 +273,16 @@ def load_embedding_cellplm(self, model_result_dir):
             import scib
             logger.info("Running scVI integration...")
             
+            batch_key = self.dataset_config.get('batch_key', 'batch')
             hvg = self.adata.var[self.adata.var.get('highly_variable', False)].index.tolist() if 'highly_variable' in self.adata.var else None
             
-            adata_integrated = scib.integration.scvi(self.adata, batch="assay", hvg=hvg)
+            adata_integrated = scib.integration.scvi(self.adata, batch=batch_key, hvg=hvg)
             
             if 'X_emb' not in adata_integrated.obsm:
                 raise ValueError("scVI integration failed: X_emb not found")
             
             self.adata = adata_integrated
-            embedding = adata_integrated.obsm['X_emb']
-            logger.info(f"Loaded scVI embedding: {embedding.shape}")
-            return embedding
+            logger.info(f"Integrated scVI embedding: {self.adata.obsm['X_emb'].shape}")
         except Exception as e:
             logger.error(f"scVI integration failed: {e}")
             raise
@@ -302,17 +293,16 @@ def load_embedding_cellplm(self, model_result_dir):
             import scib
             logger.info("Running Harmony integration...")
             
+            batch_key = self.dataset_config.get('batch_key', 'batch')
             hvg = self.adata.var[self.adata.var.get('highly_variable', False)].index.tolist() if 'highly_variable' in self.adata.var else None
             
-            adata_integrated = scib.integration.harmony(self.adata, batch="assay", hvg=hvg)
+            adata_integrated = scib.integration.harmony(self.adata, batch=batch_key, hvg=hvg)
             
             if 'X_emb' not in adata_integrated.obsm:
                 raise ValueError("Harmony integration failed: X_emb not found")
             
             self.adata = adata_integrated
-            embedding = adata_integrated.obsm['X_emb']
-            logger.info(f"Loaded Harmony embedding: {embedding.shape}")
-            return embedding
+            logger.info(f"Integrated Harmony embedding: {self.adata.obsm['X_emb'].shape}")
         except Exception as e:
             logger.error(f"Harmony integration failed: {e}")
             raise
@@ -323,71 +313,61 @@ def load_embedding_cellplm(self, model_result_dir):
             import scib
             logger.info("Running Scanorama integration...")
             
+            batch_key = self.dataset_config.get('batch_key', 'batch')
             hvg = self.adata.var[self.adata.var.get('highly_variable', False)].index.tolist() if 'highly_variable' in self.adata.var else None
             
-            adata_integrated = scib.integration.scanorama(self.adata, batch="assay", hvg=hvg)
+            adata_integrated = scib.integration.scanorama(self.adata, batch=batch_key, hvg=hvg)
             
             if 'X_emb' not in adata_integrated.obsm:
                 raise ValueError("Scanorama integration failed: X_emb not found")
             
             self.adata = adata_integrated
-            embedding = adata_integrated.obsm['X_emb']
-            logger.info(f"Loaded Scanorama embedding: {embedding.shape}")
-            return embedding
+            logger.info(f"Integrated Scanorama embedding: {self.adata.obsm['X_emb'].shape}")
         except Exception as e:
             logger.error(f"Scanorama integration failed: {e}")
             raise
     
-    def load_embedding(self, model_name):
-        """Load embedding based on model name."""
+    def load_and_integrate_embedding(self, model_name):
+        """Load and integrate embedding in one step."""
         model_name_lower = model_name.lower()
         
-        if model_name_lower in ['scvi', 'harmony', 'scanorama']:
-            if model_name_lower == 'scvi':
-                embedding = self.load_embedding_scvi(None)
-            elif model_name_lower == 'harmony':
-                embedding = self.load_embedding_harmony(None)
-            elif model_name_lower == 'scanorama':
-                embedding = self.load_embedding_scanorama(None)
+        # For integration methods, model_result_dir is not used but parameter is required
+        model_result_dir = os.path.join(self.result_dir, model_name)
+        
+        if model_name_lower == 'uce':
+            self.load_embedding_uce(model_result_dir)
+        elif model_name_lower == 'cellplm':
+            self.load_embedding_cellplm(model_result_dir)
+        elif model_name_lower == 'geneformer':
+            self.load_embedding_geneformer(model_result_dir)
+        elif model_name_lower == 'genecompass':
+            self.load_embedding_genecompass(model_result_dir)
+        elif model_name_lower == 'scfoundation':
+            self.load_embedding_scfoundation(model_result_dir)
+        elif model_name_lower == 'sccello':
+            self.load_embedding_sccello(model_result_dir)
+        elif model_name_lower == 'nicheformer':
+            self.load_embedding_nicheformer(model_result_dir)
+        elif model_name_lower == 'scgpt':
+            self.load_embedding_scgpt(model_result_dir)
+        elif model_name_lower == 'pca':
+            self.load_embedding_pca(model_result_dir)
+        elif model_name_lower == 'scvi':
+            self.load_embedding_scvi(model_result_dir)
+        elif model_name_lower == 'harmony':
+            self.load_embedding_harmony(model_result_dir)
+        elif model_name_lower == 'scanorama':
+            self.load_embedding_scanorama(model_result_dir)
         else:
-            model_result_dir = os.path.join(self.result_dir, model_name)
-            
-            if not os.path.exists(model_result_dir):
-                raise FileNotFoundError(f"Result directory not found: {model_result_dir}")
-            
-            logger.info(f"Loading {model_name} embedding from {model_result_dir}")
-            
-            if model_name_lower == 'uce':
-                embedding = self.load_embedding_uce(model_result_dir)
-            elif model_name_lower == 'cellplm':
-                embedding = self.load_embedding_cellplm(model_result_dir)
-            elif model_name_lower == 'geneformer':
-                embedding = self.load_embedding_geneformer(model_result_dir)
-            elif model_name_lower == 'genecompass':
-                embedding = self.load_embedding_genecompass(model_result_dir)
-            elif model_name_lower == 'scfoundation':
-                embedding = self.load_embedding_scfoundation(model_result_dir)
-            elif model_name_lower == 'sccello':
-                embedding = self.load_embedding_sccello(model_result_dir)
-            elif model_name_lower == 'nicheformer':
-                embedding = self.load_embedding_nicheformer(model_result_dir)
-            elif model_name_lower == 'scgpt':
-                embedding = self.load_embedding_scgpt(model_result_dir)
-            elif model_name_lower == 'pca':
-                embedding = self.load_embedding_pca(model_result_dir)
-            else:
-                raise ValueError(f"Unknown model: {model_name}")
+            raise ValueError(f"Unknown model: {model_name}")
         
-        if embedding.shape[0] != self.adata.n_obs:
-            raise ValueError(f"Embedding shape mismatch: {embedding.shape[0]} vs {self.adata.n_obs}")
+        if 'X_emb' not in self.adata.obsm:
+            raise ValueError("Embedding not found in adata.obsm['X_emb']")
         
-        return embedding
-    
-    def integrate_embedding(self, embedding):
-        """Integrate embedding into adata.obsm."""
-        self.adata.obsm['X_emb'] = embedding
-        logger.info("Integrated embedding into adata.obsm['X_emb']")
-    
+        if self.adata.obsm['X_emb'].shape[0] != self.adata.n_obs:
+            raise ValueError(f"Embedding shape mismatch: {self.adata.obsm['X_emb'].shape[0]} vs {self.adata.n_obs}")
+        
+        
     def compute_neighbors_umap(self):
         """Compute neighbors and UMAP from embedding."""
         logger.info("Computing neighbors and UMAP...")
@@ -432,6 +412,7 @@ def load_embedding_cellplm(self, model_result_dir):
         self.adata.write_h5ad(output_file, compression='gzip')
         logger.info(f"Saved: {output_file}")
     
+    
     def integrate(self, model_name):
         """Full integration pipeline."""
         logger.info(f"{'='*60}")
@@ -439,14 +420,13 @@ def load_embedding_cellplm(self, model_result_dir):
         logger.info(f"{'='*60}")
         
         self.load_data()
-        embedding = self.load_embedding(model_name)
-        self.integrate_embedding(embedding)
+        self.load_and_integrate_embedding(model_name)
         self.compute_neighbors_umap()
         self.visualize(model_name)
         self.save_results(model_name)
         
         logger.info(f"Integration complete for {model_name.upper()}\n")
-
+    
 
 def main():
     parser = argparse.ArgumentParser(description='Integrate embeddings')
@@ -479,14 +459,10 @@ def main():
     logger.info(f"Result dir: {result_dir}")
     
     try:
-        integrator = EmbeddingIntegrator(dataset_dir, result_dir, config)
+        integrator = EmbeddingIntegrator(dataset_dir, result_dir, config, args.dataset)
         integrator.integrate(args.model)
         logger.info(f"------ Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
     except Exception as e:
         logger.error(f"Integration failed: {e}")
         logger.error(f"------ Error: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ------")
         raise
-
-
-if __name__ == '__main__':
-    main()

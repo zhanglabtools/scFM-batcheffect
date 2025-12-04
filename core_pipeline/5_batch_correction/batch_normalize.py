@@ -193,7 +193,7 @@ class BatchNormalizer:
         batchcor = BatchCorrection(
             bras=True,
             ilisi_knn=False,
-            kbet_per_label=True,
+            kbet_per_label=False,
             graph_connectivity=True,
             pcr_comparison=False
         )

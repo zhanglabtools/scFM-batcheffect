@@ -43,14 +43,14 @@ def load_config(config_path):
 
 def summarize_and_save_results(all_results, results_path, n_splits):
     """
-    汇总并保存CV结果
+    Summarize and save CV results
     
-    参数:
-        all_results (list): 所有任务的结果列表
-        results_path (str): 结果保存路径
-        n_splits (int): 折数
+    Parameters:
+        all_results (list): List of results from all tasks
+        results_path (str): Path to save results
+        n_splits (int): Number of splits
     """
-    # 组织结果数据
+    # Organize result data
     cv_data = []
     
     for result in all_results:
@@ -59,7 +59,7 @@ def summarize_and_save_results(all_results, results_path, n_splits):
             fold_idx = result['fold_idx']
             metrics = result['metrics']
             
-            # 添加整体准确率和macro-f1
+            # Add overall accuracy and macro-f1
             cv_data.append({
                 'model_name': model_name,
                 'fold': fold_idx,
@@ -69,7 +69,7 @@ def summarize_and_save_results(all_results, results_path, n_splits):
                 'support': sum([m['support'] for m in metrics['class_metrics'].values()])
             })
             
-            # 添加每个类别的准确率和f1
+            # Add per-class accuracy and f1
             for class_name, class_metric in metrics['class_metrics'].items():
                 cv_data.append({
                     'model_name': model_name,
@@ -80,11 +80,11 @@ def summarize_and_save_results(all_results, results_path, n_splits):
                     'support': class_metric['support']
                 })
     
-    # 转换为DataFrame
+    # Convert to DataFrame
     df = pd.DataFrame(cv_data)
     
     if len(df) > 0:
-        # 计算统计汇总
+        # Calculate statistical summary
         summary_data = []
         
         for model_name in df['model_name'].unique():
@@ -94,7 +94,7 @@ def summarize_and_save_results(all_results, results_path, n_splits):
                 dataset_df = model_df[model_df['dataset'] == dataset]
                 
                 if len(dataset_df) >= n_splits:
-                    # 计算均值
+                    # Calculate mean
                     summary_data.append({
                         'model_name': model_name,
                         'fold': 'mean',
@@ -104,7 +104,7 @@ def summarize_and_save_results(all_results, results_path, n_splits):
                         'support': int(dataset_df['support'].mean())
                     })
                     
-                    # 计算标准差
+                    # Calculate standard deviation
                     summary_data.append({
                         'model_name': model_name,
                         'fold': 'std',
@@ -114,23 +114,23 @@ def summarize_and_save_results(all_results, results_path, n_splits):
                         'support': int(dataset_df['support'].std())
                     })
         
-        # 添加汇总数据
+        # Add summary data
         summary_df = pd.DataFrame(summary_data)
         final_df = pd.concat([df, summary_df], ignore_index=True)
         
-        # 排序
+        # Sort
         final_df = final_df.sort_values(['model_name', 'dataset', 'fold']).reset_index(drop=True)
         
-        # 保存结果
+        # Save results
         os.makedirs(os.path.dirname(results_path), exist_ok=True)
         final_df.to_csv(results_path, index=False, float_format='%.6f')
         
-        logger.info(f"✓ CV结果已保存到: {results_path}")
+        logger.info(f"✓ CV results saved to: {results_path}")
         
-        # 打印简要汇总
+        # Print brief summary
         overall_mean = final_df[(final_df['dataset'] == 'overall') & (final_df['fold'] == 'mean')]
         if len(overall_mean) > 0:
-            logger.info("\n整体准确率 (均值 ± 标准差):")
+            logger.info("\nOverall Accuracy (mean ± std):")
             for _, row in overall_mean.iterrows():
                 model_name = row['model_name']
                 mean_acc = row['accuracy']
@@ -141,7 +141,7 @@ def summarize_and_save_results(all_results, results_path, n_splits):
                     std_acc = std_row.iloc[0]['accuracy']
                     logger.info(f"  {model_name}: {mean_acc:.4f} ± {std_acc:.4f}")
     else:
-        logger.warning("❌ 没有成功的结果可以汇总")
+        logger.warning("No successful results to summarize")
 
 
 def probing_main(dataset_name, model_name, config_path, batch_center=False):
@@ -167,11 +167,11 @@ def probing_main(dataset_name, model_name, config_path, batch_center=False):
     result_dir = dataset_config.get('output_res_dir',
                                     os.path.join(dataset_config['output_data_dir'], 'Result', dataset_name))
     
-    # 从 config 读取 batch_key 和 label_key
+    # Read batch_key and label_key from config
     batch_key = dataset_config.get('batch_key', 'batch')
     label_key = dataset_config.get('celltype_key', 'cell_type')
     
-    # 从 probing config 读取参数
+    # Read probing config parameters
     probing_config = config.get('probing', {})
     n_splits = probing_config.get('n_splits', 5)
     max_workers = probing_config.get('max_workers', 4)
@@ -217,9 +217,9 @@ def probing_main(dataset_name, model_name, config_path, batch_center=False):
     
     try:
         cv_manager.load_cv_splits()
-        logger.info(f"Loaded existing CV splits")
+        logger.info("Loaded existing CV splits")
     except FileNotFoundError:
-        logger.info(f"Creating new CV splits...")
+        logger.info("Creating new CV splits...")
         cv_manager.create_cv_splits(
             adata=adata,
             target_key=label_key,

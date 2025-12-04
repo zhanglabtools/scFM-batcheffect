@@ -12,6 +12,7 @@ import warnings
 import pickle
 import json
 import os
+import logging
 from datetime import datetime
 import concurrent.futures
 from multiprocessing import Pool
@@ -19,8 +20,10 @@ import functools
 
 warnings.filterwarnings('ignore')
 
+logger = logging.getLogger(__name__)
+
 class CVDataSplitManager:
-    """5折交叉验证数据划分管理器"""
+    """5-fold cross-validation data split manager"""
     
     def __init__(self, save_dir="./cv_splits"):
         self.save_dir = save_dir
@@ -28,42 +31,42 @@ class CVDataSplitManager:
         self.split_file = os.path.join(save_dir, "cv_splits_5fold.pkl")
         self.config_file = os.path.join(save_dir, "cv_config.json")
         
-        print(f"CV数据划分管理器初始化完成，保存目录: {self.save_dir}")
+        logger.info(f"CV split manager initialized. Save directory: {self.save_dir}")
     
     def create_cv_splits(self, adata, target_key="study", n_splits=5, random_state=42, 
                         stratify_column=None, force_recreation=False):
-        """创建5折交叉验证划分"""
+        """Create n-fold cross-validation splits"""
         
-        # 检查是否已有划分文件
+        # Check if split file already exists
         if os.path.exists(self.split_file) and not force_recreation:
             raise FileExistsError(
-                f"CV划分文件已存在: {self.split_file}\n"
-                f"如果要重新创建，请设置 force_recreation=True"
+                f"CV split file already exists: {self.split_file}\n"
+                f"Set force_recreation=True to recreate it"
             )
         
-        print(f"创建{n_splits}折交叉验证划分...")
+        logger.info(f"Creating {n_splits}-fold cross-validation splits...")
         
-        # 检查必要的列
+        # Check required columns
         if 'cell_id' not in adata.obs.columns:
-            raise ValueError("adata.obs中缺少'cell_id'列")
+            raise ValueError("Missing 'cell_id' column in adata.obs")
         
-        # 提取数据
+        # Extract data
         cell_ids = adata.obs['cell_id'].values
         labels = adata.obs[target_key].values
         
-        # 确定分层依据
+        # Determine stratification basis
         if stratify_column is None:
             stratify_labels = labels
-            stratify_info = f"按{target_key}分层"
+            stratify_info = f"Stratified by {target_key}"
         elif stratify_column in adata.obs.columns:
             stratify_labels = adata.obs[stratify_column].values
-            stratify_info = f"按{stratify_column}分层"
+            stratify_info = f"Stratified by {stratify_column}"
         else:
-            print(f"警告: 未找到'{stratify_column}'列，将按{target_key}分层")
+            logger.warning(f"Column '{stratify_column}' not found, stratifying by {target_key}")
             stratify_labels = labels
-            stratify_info = f"按{target_key}分层(fallback)"
+            stratify_info = f"Stratified by {target_key} (fallback)"
         
-        # 创建5折划分
+        # Create n-fold splits
         skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
         cv_splits = {}
         
@@ -78,9 +81,9 @@ class CVDataSplitManager:
                 'test_indices': test_indices.tolist()
             }
             
-            print(f"Fold {fold_idx}: 训练集 {len(train_cell_ids)}, 测试集 {len(test_cell_ids)}")
+            logger.info(f"Fold {fold_idx}: train={len(train_cell_ids)}, test={len(test_cell_ids)}")
         
-        # 添加元信息
+        # Add metadata
         cv_splits['metadata'] = {
             'n_splits': n_splits,
             'total_cells': len(cell_ids),
@@ -93,44 +96,44 @@ class CVDataSplitManager:
             'created_time': datetime.now().isoformat()
         }
         
-        # 保存划分
+        # Save splits
         with open(self.split_file, 'wb') as f:
             pickle.dump(cv_splits, f)
         
-        # 保存配置
+        # Save config
         config = cv_splits['metadata'].copy()
         with open(self.config_file, 'w') as f:
             json.dump(config, f, indent=2)
         
-        print(f"CV划分已保存到: {self.split_file}")
+        logger.info(f"CV splits saved to: {self.split_file}")
         return cv_splits
     
     def load_cv_splits(self):
-        """加载CV划分"""
+        """Load CV splits"""
         if not os.path.exists(self.split_file):
-            raise FileNotFoundError(f"CV划分文件不存在: {self.split_file}")
+            raise FileNotFoundError(f"CV split file not found: {self.split_file}")
         
         with open(self.split_file, 'rb') as f:
             cv_splits = pickle.load(f)
         
         n_splits = cv_splits['metadata']['n_splits']
-        # print(f"CV划分已加载: {n_splits}折")
+        # logger.info(f"CV splits loaded: {n_splits}-fold")
         return cv_splits
     
     def get_fold_indices(self, adata, fold_idx, cv_splits=None):
-        """获取指定fold的训练/测试索引"""
+        """Get train/test indices for specified fold"""
         if cv_splits is None:
             cv_splits = self.load_cv_splits()
         
         fold_key = f'fold_{fold_idx}'
         if fold_key not in cv_splits:
-            raise ValueError(f"不存在的fold: {fold_idx}")
+            raise ValueError(f"Invalid fold: {fold_idx}")
         
         fold_data = cv_splits[fold_key]
         cell_ids = adata.obs['cell_id'].values
         cell_id_to_index = {cell_id: idx for idx, cell_id in enumerate(cell_ids)}
         
-        # 获取索引
+        # Get indices
         train_indices = []
         test_indices = []
         
@@ -146,24 +149,24 @@ class CVDataSplitManager:
 
 
 class CVLinearProbingAnalyzer:
-    """支持5折交叉验证的线性探测分析器"""
+    """Linear probing analyzer with 5-fold cross-validation support"""
     
     def __init__(self, save_dir, fold_idx):
         """
-        初始化分析器
+        Initialize analyzer
         
         Parameters:
         -----------
         save_dir : str
-            模型保存目录（例如：./results/cellplm）
+            Model save directory (e.g., ./results/cellplm)
         fold_idx : int
-            当前fold索引
+            Current fold index
         """
         self.fold_idx = fold_idx
         self.fold_dir = os.path.join(save_dir, f"fold_{fold_idx}")
         os.makedirs(self.fold_dir, exist_ok=True)
         
-        # 数据相关
+        # Data-related attributes
         self.adata = None
         self.embedding_key = None
         self.target_key = None
@@ -172,12 +175,12 @@ class CVLinearProbingAnalyzer:
         self.y_train = None
         self.y_test = None
         
-        # 预处理器和模型
+        # Preprocessors and model
         self.label_encoder = None
         self.scaler = None
         self.model = None
         
-        # 文件路径
+        # File paths
         self.data_split_path = os.path.join(self.fold_dir, "data_split.pkl")
         self.preprocessors_path = os.path.join(self.fold_dir, "preprocessors.pkl")
         self.model_path = os.path.join(self.fold_dir, "model.pkl")
@@ -186,67 +189,67 @@ class CVLinearProbingAnalyzer:
     
     def prepare_data(self, adata, embedding_key, target_key, train_indices, test_indices, 
                     normalize=True, force_recompute=False):
-        """准备数据"""
+        """Prepare data for training"""
         
-        # 检查是否已有数据
+        # Check if data already exists
         if not force_recompute and self._load_data_split() and self._load_preprocessors():
-            # print(f"Fold {self.fold_idx}: 数据已从磁盘加载")
+            # logger.info(f"Fold {self.fold_idx}: Data loaded from disk")
             return
         
         self.adata = adata
         self.embedding_key = embedding_key
         self.target_key = target_key
         
-        # 提取数据
+        # Extract data
         X = adata.obsm[embedding_key]
         y = adata.obs[target_key].values
         
-        # 编码标签
+        # Encode labels
         self.label_encoder = LabelEncoder()
         y_encoded = self.label_encoder.fit_transform(y)
         
-        # 划分数据
+        # Split data
         self.X_train = X[train_indices]
         self.X_test = X[test_indices]
         self.y_train = y_encoded[train_indices]
         self.y_test = y_encoded[test_indices]
         
-        # 标准化
+        # Normalize
         if normalize:
             self.scaler = StandardScaler()
             self.X_train = self.scaler.fit_transform(self.X_train)
             self.X_test = self.scaler.transform(self.X_test)
         
-        # 保存数据
+        # Save data
         self._save_data_split()
         self._save_preprocessors()
         self._save_config(normalize=normalize)
         
-        # print(f"Fold {self.fold_idx}: 数据准备完成, 训练集 {self.X_train.shape}, 测试集 {self.X_test.shape}")
+        # logger.info(f"Fold {self.fold_idx}: Data prepared. Train: {self.X_train.shape}, Test: {self.X_test.shape}")
     
     def train_and_evaluate(self, C=1.0, force_recompute=False):
-        """训练并评估模型"""
+        """Train and evaluate model"""
         
-        # 训练模型（可能从缓存加载）
+        # Train model (may load from cache)
         if not force_recompute and self._load_model():
-            print(f"Fold {self.fold_idx}: 模型已从磁盘加载")
+            logger.info(f"Fold {self.fold_idx}: Model loaded from disk")
         else:
-            print(f"Fold {self.fold_idx}: 开始训练...")
+            logger.info(f"Fold {self.fold_idx}: Starting training...")
             self.model = LogisticRegression(C=C, max_iter=1000, random_state=42, n_jobs=-1)
             self.model.fit(self.X_train, self.y_train)
             self._save_model()
-            # print(f"Fold {self.fold_idx}: 模型训练完成并已保存")
+            # logger.info(f"Fold {self.fold_idx}: Model training completed and saved")
         
-        # 计算指标（不缓存）
-        print(f"Fold {self.fold_idx}: 开始计算指标...")
+        # Compute metrics (not cached)
+        logger.info(f"Fold {self.fold_idx}: Computing metrics...")
         y_pred = self.model.predict(self.X_test)
         cm = confusion_matrix(self.y_test, y_pred)
         overall_accuracy = accuracy_score(self.y_test, y_pred)
         
-        # 计算每个类别的指标和macro-f1
+        # Compute metrics per class and macro-f1
         class_metrics, macro_f1 = self._calculate_class_metrics(cm)
         
-        # 组织结果
+        # Organize results
         metrics = {
             'fold_idx': self.fold_idx,
             'overall_accuracy': overall_accuracy,
@@ -256,28 +259,28 @@ class CVLinearProbingAnalyzer:
             'class_names': self.label_encoder.classes_.tolist()
         }
         
-        # print(f"Fold {self.fold_idx}: 评估完成，准确率 {overall_accuracy:.4f}, Macro-F1 {macro_f1:.4f}")
+        # logger.info(f"Fold {self.fold_idx}: Evaluation complete. Accuracy: {overall_accuracy:.4f}, Macro-F1: {macro_f1:.4f}")
         return metrics
 
     def _calculate_class_metrics(self, cm):
-        """计算每个类别的指标"""
+        """Calculate metrics for each class"""
         class_metrics = {}
-        f1_scores = []  # 用于计算macro-f1
+        f1_scores = []  # For calculating macro-f1
         
         for i, class_name in enumerate(self.label_encoder.classes_):
-            tp = cm[i, i]  # 该类别预测正确的样本数
-            fp = cm[:, i].sum() - tp  # 假正例
-            fn = cm[i, :].sum() - tp  # 假负例
-            support = cm[i, :].sum()  # 该类别的总样本数
+            tp = cm[i, i]  # True positives for this class
+            fp = cm[:, i].sum() - tp  # False positives
+            fn = cm[i, :].sum() - tp  # False negatives
+            support = cm[i, :].sum()  # Total samples in this class
             
-            # 类别准确率 = 该类别正确样本 / 该类别总样本
+            # Class accuracy = correct predictions / total samples for this class
             class_accuracy = tp / support if support > 0 else 0
             
-            # 计算precision和recall
+            # Calculate precision and recall
             precision = tp / (tp + fp) if (tp + fp) > 0 else 0
             recall = tp / (tp + fn) if (tp + fn) > 0 else 0
             
-            # 计算F1
+            # Calculate F1
             f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
             f1_scores.append(f1)
             
@@ -287,13 +290,13 @@ class CVLinearProbingAnalyzer:
                 'support': int(support)
             }
         
-        # 计算macro-f1
+        # Calculate macro-f1
         macro_f1 = np.mean(f1_scores) if f1_scores else 0
         
         return class_metrics, macro_f1
     
     
-    # 保存/加载方法（与原来类似）
+    # Save/load methods
     def _save_data_split(self):
         split_data = {
             'X_train': self.X_train,
@@ -364,26 +367,26 @@ class CVLinearProbingAnalyzer:
             json.dump(config, f, indent=2)
 
 
-# 并行处理函数
+# Parallel processing function
 def process_single_fold_model(args):
-    """处理单个(模型, fold)组合的函数"""
+    """Process single (model, fold) combination"""
     model_config, fold_idx, cv_split_manager, force_recompute = args
     
     try:
         import scanpy as sc
         import gc
         
-        # 加载数据
+        # Load data
         adata = sc.read_h5ad(model_config['adata_path'])
         
-        # 获取fold的训练/测试索引
+        # Get train/test indices for fold
         cv_splits = cv_split_manager.load_cv_splits()
         train_indices, test_indices = cv_split_manager.get_fold_indices(adata, fold_idx, cv_splits)
         
-        # 创建分析器
+        # Create analyzer
         analyzer = CVLinearProbingAnalyzer(model_config['save_path'], fold_idx)
         
-        # 准备数据
+        # Prepare data
         analyzer.prepare_data(
             adata=adata,
             embedding_key=model_config['embedding_key'],
@@ -394,10 +397,10 @@ def process_single_fold_model(args):
             force_recompute=force_recompute
         )
         
-        # 训练和评估
+        # Train and evaluate
         metrics = analyzer.train_and_evaluate(C=1.0, force_recompute=force_recompute)
         
-        # 清理内存
+        # Clean up memory
         del adata
         del analyzer
         gc.collect()

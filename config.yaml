@@ -10,7 +10,8 @@ model_paths:
     thread_num: 4
     gpu: 0
     batch_size: 32
-  
+    embedding_dim: 1152
+
   genecompass:
     code_path: "/home/wanglinting/LCBERT/Download/GeneCompass/genecompass"
     prior_knowledge_path: "/home/wanglinting/scFM/Download/GeneCompass/prior_knowledge"
@@ -29,11 +30,12 @@ model_paths:
   
 
   cellplm:
-    model_dir: "/home/wanglinting/scFM/Download/CellPLM"
+    module_path: "/home/wanglinting/scFM/Download/CellPLM"
     pretrain_directory: "/home/wanglinting/LCBERT/Download/CellPLM/ckpt"
     pretrain_version: "20231027_85M"
     gpu: 2
-  
+    batch_size: 2048
+
   uce:
     code_path: "/home/wanglinting/scFM/Download/UCE"
     model_path: "/home/wanglinting/scFM/Download/UCE/model_files/33l_8ep_1024t_1280.torch"
@@ -74,8 +76,29 @@ model_paths:
     chunk_size: 1000
     num_workers: 4
     modality_code: 3       # dissociated
-    specie_code: 5         # human
-    assay_code: 12         # 10x 3' v2
+    technology_dict:
+      "merfish": 7
+      "MERFISH": 7
+      "cosmx": 8
+      "NanoString digital spatial profiling": 8
+      "visium": 9
+      "10x 5' v2": 10
+      "10x 3' v3": 11
+      "10x 3' v2": 12
+      "10x 5' v1": 13
+      "10x 3' v1": 14
+      "10x 3' transcription profiling": 15
+      "10x transcription profiling": 15
+      "10x 5' transcription profiling": 16
+      "CITE-seq": 17
+      "Smart-seq v4": 18
+    species_dict:
+      "human": 5
+      "Human": 5
+      "mouse": 6
+      "Mouse": 6
+      "Mus musculus": 6
+      "Homo sapiens": 5
 
 
 # Batch correction parameters
@@ -107,6 +130,7 @@ datasets:
     output_res_dir: "/home/wanglinting/scFM/Result/limb"
     batch_key: "organism"
     celltype_key: "cell_type"
+    gene_col: "gene_symbols"
 
   
   liver:
@@ -116,6 +140,7 @@ datasets:
     output_res_dir: "/home/wanglinting/scFM/Result/liver"
     batch_key: "donor_id"
     celltype_key: "cell_type"
+    gene_col: "gene_symbols"
 
   
   Immune:
@@ -125,6 +150,7 @@ datasets:
     output_res_dir: "/home/wanglinting/scFM/Result/Immune"
     batch_key: "tissue"
     celltype_key: "cell_type_level_2"
+    gene_col: "gene_symbols"
 
   
   HLCA_assay:
@@ -134,6 +160,7 @@ datasets:
     output_res_dir: "/home/wanglinting/scFM/Result/HLCA_assay"
     batch_key: "assay"
     celltype_key: "final_annotation"
+    gene_col: "original_gene_symbols"
 
   
   HLCA_disease:
@@ -143,6 +170,7 @@ datasets:
     output_res_dir: "/home/wanglinting/scFM/Result/HLCA_disease"
     batch_key: "disease"
     celltype_key: "final_annotation"
+    gene_col: "original_gene_symbols"
 
   
   HLCA_sn:
@@ -152,5 +180,5 @@ datasets:
     output_res_dir: "/home/wanglinting/scFM/Result/HLCA_sn"
     batch_key: "suspension_type"
     celltype_key: "final_annotation"
-
+    gene_col: "original_gene_symbols"
 
