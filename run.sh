@@ -4,7 +4,7 @@ set -e
 
 # Set datasets and models   
 DATA_LIST="limb,liver,Immune,HLCA_assay,HLCA_disease,HLCA_sn"
-MODEL_LIST="uce,cellplm,geneformer,genecompass,scfoundation,sccello,nicheformer"
+MODEL_LIST="uce,cellplm,geneformer,genecompass,scfoundation,sccello,nicheformer,pca,harmony,scvi,scanorama"
 CONFIG_FILE="config.yaml"
 
 IFS=',' read -ra DATASETS <<< "$DATA_LIST"
