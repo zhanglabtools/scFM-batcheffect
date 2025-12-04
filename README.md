@@ -6,7 +6,9 @@ Constructing a cell universe requires integrating heterogeneous single-cell RNA-
 
 ---
 
-## Structure of this repository
+## About This Repository
+
+This repository stores relevant analysis and plotting codes.
 
 ```
 scFM-batcheffect/
@@ -42,10 +44,10 @@ scFM-batcheffect/
 
 ### Integration Methods
 All the traditional integration methods can be applied using [scIB](https://github.com/theislab/scib).
- - **PCA** 
- - **Harmony**
- - **Scanorama**
- - **scVI** 
+ - PCA
+ - [Harmony](https://github.com/immunogenomics/harmony)
+ - [Scanorama](https://github.com/brianhie/scanorama)  
+ - [scVI](https://scvi-tools.org/)  
 
 
 ### Datasets
@@ -264,5 +266,6 @@ python 6_probing/probing_main.py \
 
 # Repeat for other models and datasets
 ```
+
 
 
