@@ -41,7 +41,7 @@ scFM-batcheffect/
 - [NicheFormer](https://github.com/theislab/nicheformer)
 
 ### Integration Methods
-All the traditional integration methods can be applied using [scIB](https://github.com/theislab/scib)
+All the traditional integration methods can be applied using [scIB](https://github.com/theislab/scib).
  - **PCA** 
  - **Harmony**
  - **Scanorama**
@@ -71,15 +71,15 @@ conda create -n scfm python=3.10
 conda activate scfm
 
 # Install common dependencies
-pip install scanpy anndata pandas numpy matplotlib scikit-learn pyyaml 
+pip install scanpy pandas scipy numpy matplotlib scikit-learn pyyaml 
 
 # Install evaluation and integration methods
-pip install scib scib_metrics scvi-tools harmony-py scanorama
+pip install scib scib_metrics scvi-tools harmony-pytorch scanorama
 ```
 
 #### Foundation Model-Specific Environment Setup
 
-Each foundation model has different dependencies and require separate environments. Please refer to the respective tutorials of each model for deployment
+Each foundation model has different dependencies and require separate environments. Please refer to the respective tutorials of each model.
 
 
 ### 2. Configure config.yaml
@@ -108,14 +108,14 @@ model_paths:
 datasets:
   limb:
     data_path: "/path/to/limb/raw.h5ad"
-    output_data_dir: "/path/to/limb/processed"
+    output_data_dir: "/path/to/limb/processed_data"
     output_res_dir: "/path/to/limb/results"
     batch_key: "batch"
     celltype_key: "cell_type"
 
   liver:
     data_path: "/path/to/liver/raw.h5ad"
-    output_data_dir: "/path/to/liver/processed"
+    output_data_dir: "/path/to/liver/processed_data"
     output_res_dir: "/path/to/liver/results"
     batch_key: "batch"
     celltype_key: "cell_type"
@@ -161,21 +161,17 @@ python 0_data_preprocess/data_preprocess.py \
     --dataset limb \
     --config ../config.yaml
 
-# Preprocess other datasets
+# Preprocess liver datasets
 python 0_data_preprocess/data_preprocess.py \
     --dataset liver \
     --config ../config.yaml
 
-python 0_data_preprocess/data_preprocess.py \
-    --dataset Immune \
-    --config ../config.yaml
-
-# ... other datasets
+# Repeat for other datasets
 ```
 
 ##### Stage 1: Model-Specific Data Preparation
 
-Run all models for each dataset:
+Run each model for each dataset:
 
 ```bash
 # For limb dataset, prepare all model-specific data
@@ -184,7 +180,7 @@ python 1_data_model_preparation/prepare_uce.py --dataset limb --config ../config
 python 1_data_model_preparation/prepare_cellplm.py --dataset limb --config ../config.yaml
 bash 1_data_model_preparation/prepare_sccello.sh --dataset limb --config ../config.yaml
 
-# Repeat for other datasets
+# Repeat for other models and datasets
 ```
 
 ##### Stage 2: Embedding Extraction
@@ -235,7 +231,7 @@ python 4_benchmark/benchmark.py \
 python 4_benchmark/benchmark.py \
     --dataset limb --model geneformer --config ../config.yaml
 
-# ... benchmark all models on all datasets
+# Repeat for other models and datasets
 ```
 
 ##### Stage 5: Batch Correction
@@ -250,7 +246,7 @@ python 5_batch_correction/batch_normalize.py \
 python 5_batch_correction/batch_normalize.py \
     --dataset limb --model geneformer --config ../config.yaml
 
-# ... batch correct all models on all datasets
+# Repeat for other models and datasets
 ```
 
 ##### Stage 6: Linear Probing Analysis
@@ -266,6 +262,7 @@ python 6_probing/probing_main.py \
 python 6_probing/probing_main.py \
     --dataset limb --model uce --batch-center --config ../config.yaml
 
-# ... run probing for all models on all datasets
+# Repeat for other models and datasets
 ```
+
 
