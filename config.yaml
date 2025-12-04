@@ -1,10 +1,6 @@
 # Unified configuration for scFM evaluation pipeline
 # All dataset paths, model paths, and parameters are centralized here
 
-# Global settings
-pipeline_version: "1.0"
-timezone: "Asia/Shanghai"
-
 # Model directory paths - where downloaded models are stored
 model_paths:
   geneformer:
@@ -97,10 +93,7 @@ probing:
   random_seed: 42
   classifiers:
     - logistic_regression
-    - svm
-    - random_forest
-    - mlp
-    - knn
+
 
 # Dataset configurations
 datasets:
@@ -159,4 +152,5 @@ datasets:
     output_res_dir: "/home/wanglinting/scFM/Result/HLCA_sn"
     batch_key: "suspension_type"
     celltype_key: "final_annotation"
+
 
