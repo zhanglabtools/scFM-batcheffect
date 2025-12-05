@@ -4,6 +4,9 @@
 ## Abstract
 Constructing a cell universe requires integrating heterogeneous single-cell RNA-seq datasets, which is hindered by diverse batch effects. Single-cell foundation models (scFMs), inspired by large language models, aim to learn universal cellular embeddings from large-scale single-cell data. However, unlike language, single-cell data are sparse, noisy, and strongly affected by batch artifacts, limiting cross-dataset transferability. Our systematic evaluation across diverse batch scenarios reveals that current scFMs fail to intrinsically remove batch effects, with batch signals persisting in pretrained embeddings. Post-hoc batch-centering partially improves alignment, highlighting the need for future scFMs to integrate explicit batch-effect correction mechanisms to achieve true universal cellular embeddings.
 
+![Description](./figures/Figure1.png)
+
+
 ---
 
 ## About This Repository
